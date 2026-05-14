@@ -1,0 +1,2475 @@
+"""Typer entrypoint for the indbase CLI."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import sqlite3
+from typing import Iterator
+from contextlib import contextmanager
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from indbase_core.categories import (
+    add_category,
+    archive_category,
+    list_categories,
+    restore_category,
+    template_names,
+    update_category,
+)
+from indbase_core.cards import (
+    accept_candidate_card,
+    generate_candidate_card,
+    get_candidate_card,
+    list_candidate_card_sources,
+    list_candidate_cards,
+    reject_candidate_card,
+)
+from indbase_core.classification import (
+    accept_classification_suggestion,
+    get_classification_suggestion,
+    list_classification_suggestions,
+    reject_classification_suggestion,
+    suggest_classifications,
+)
+from indbase_core.config import SearchConfig, load_config
+from indbase_core.db import connect
+from indbase_core.documents import (
+    archive_document,
+    list_documents,
+    list_document_revisions,
+    restore_document,
+    set_document_category,
+)
+from indbase_core.doctor import run_doctor
+from indbase_core.embeddings import rebuild_vector_index
+from indbase_core.errors import get_error, list_errors
+from indbase_core.ingest import run_m3_ingest_pipeline
+from indbase_core.indexer import rebuild_fts_index
+from indbase_core.ocr import list_ocr_pages, run_ocr_for_document
+from indbase_core.reviews import get_review_item, list_review_items, resolve_review_item, resolve_review_items
+from indbase_core.search import SearchOptions, search_chunks
+from indbase_core.tags import (
+    add_document_tag,
+    add_tag,
+    archive_tag,
+    list_document_tags,
+    list_tags,
+    remove_document_tag,
+    restore_tag,
+    update_tag,
+)
+from indbase_core.tasks import get_task, list_task_events, list_tasks
+from indbase_core.translations import (
+    get_translation,
+    list_translations,
+    resolve_translation_output_path,
+    translate_full_document,
+    translate_selected_chunks,
+)
+from indbase_core.vault import init_vault
+from indbase_core.version import __version__
+from indbase_cli.tui_lite import run_tui_lite
+
+app = typer.Typer(
+    add_completion=False,
+    help="Local-first personal knowledge database.",
+    no_args_is_help=True,
+)
+catalog_app = typer.Typer(help="Manage manual categories.", no_args_is_help=True)
+task_app = typer.Typer(help="Inspect local task records.", no_args_is_help=True)
+index_app = typer.Typer(help="Inspect and rebuild local indexes.", no_args_is_help=True)
+doc_app = typer.Typer(help="Inspect and manage documents.", no_args_is_help=True)
+review_app = typer.Typer(help="Inspect and resolve review queue items.", no_args_is_help=True)
+error_app = typer.Typer(help="Inspect recorded errors.", no_args_is_help=True)
+tag_app = typer.Typer(help="Manage manual tags.", no_args_is_help=True)
+ocr_app = typer.Typer(help="Run and inspect OCR records.", no_args_is_help=True)
+classification_app = typer.Typer(help="Create and review classification suggestions.", no_args_is_help=True)
+translation_app = typer.Typer(help="Create and inspect translation outputs.", no_args_is_help=True)
+card_app = typer.Typer(help="Create and inspect candidate card records.", no_args_is_help=True)
+console = Console()
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"indbase {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the indbase version and exit.",
+    ),
+) -> None:
+    """Run indbase commands."""
+
+
+@app.command()
+def init(
+    vault_path: Path = typer.Argument(
+        Path("."),
+        help="Vault directory to create or initialize.",
+    ),
+    category_template: str = typer.Option(
+        "minimal",
+        "--category-template",
+        help=f"Category template: {', '.join(template_names())}.",
+    ),
+) -> None:
+    """Create a vault layout, database, config, and category template."""
+    result = init_vault(vault_path, category_template=category_template)
+    console.print(f"Initialized vault: {result.vault_path}")
+    console.print(f"DB: {result.db_path}")
+    console.print(f"Config: {result.config_path}")
+    console.print(f"Task: {result.task_id}")
+    if result.applied_migrations:
+        console.print(f"Migrations: {', '.join(result.applied_migrations)}")
+    console.print(f"Categories inserted: {result.inserted_categories}")
+
+
+@app.command()
+def ingest(
+    source_input: Path = typer.Argument(..., help="File or folder to ingest through M2 revision writing."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    recursive: bool = typer.Option(
+        False,
+        "--recursive",
+        help="Recursively scan folders.",
+    ),
+) -> None:
+    """Ingest local files through source Markdown, chunks, and FTS indexing."""
+    db_path = vault / ".indbase" / "db.sqlite"
+    if not db_path.is_file():
+        console.print(f"[red]Vault database not found:[/red] {db_path}")
+        raise typer.Exit(2)
+
+    result = run_m3_ingest_pipeline(vault, source_input, recursive=recursive)
+    console.print(f"Ingest run: {result.ingest_id}")
+    console.print(f"Task: {result.task_id}")
+    console.print(f"Status: {result.status}")
+    console.print(f"Total: {result.total_items}")
+    console.print(f"Revisions written: {result.written_revisions}")
+    console.print(f"Unsupported: {result.unsupported_items}")
+    console.print(f"Duplicates: {result.duplicate_items}")
+    console.print(f"Failed: {result.failed_items}")
+    console.print(f"Chunks written: {result.chunked_documents}")
+    console.print(f"Indexed documents: {result.indexed_documents}")
+    console.print(f"Indexed chunks: {result.indexed_chunks}")
+    console.print(f"Index failures: {result.index_failed_documents}")
+    console.print(f"Searchable: {_yes_no(result.searchable)}")
+    if result.status == "completed_with_issues":
+        raise typer.Exit(1)
+    if result.status == "failed":
+        raise typer.Exit(2)
+
+
+@app.command()
+def doctor(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory to inspect.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit a structured JSON report.",
+    ),
+) -> None:
+    """Check vault health without modifying it."""
+    report = run_doctor(vault)
+    if json_output:
+        typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+        raise typer.Exit(report.exit_code)
+
+    table = Table(title=f"Doctor: {report.vault_path}")
+    table.add_column("Severity")
+    table.add_column("Code")
+    table.add_column("Message")
+    for finding in report.findings:
+        table.add_row(finding.severity, finding.code, finding.message)
+    console.print(table)
+    raise typer.Exit(report.exit_code)
+
+
+@app.command()
+def search(
+    query: str = typer.Argument(..., help="Query text to retrieve source snippets."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    top_k: int | None = typer.Option(
+        None,
+        "--top-k",
+        min=1,
+        help="Maximum number of snippets to return.",
+    ),
+    mode: str = typer.Option(
+        "fts",
+        "--mode",
+        help="Search mode: fts, vector, or hybrid.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Search current source chunks and render citation snippets."""
+    options = _search_options_for_vault(vault, top_k=top_k, mode=mode)
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = search_chunks(connection, query, options=options)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "query_id": result.query_id,
+                    "query_text": result.query_text,
+                    "result_count": result.result_count,
+                    "results": [
+                        {
+                            "rank": row.rank,
+                            "doc_id": row.doc_id,
+                            "revision_id": row.revision_id,
+                            "chunk_id": row.chunk_id,
+                            "title": row.title,
+                            "source_path": row.source_path,
+                            "snippet": row.snippet,
+                            "score": row.score,
+                            "match_source": row.match_source,
+                        }
+                        for row in result.results
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    if not result.results:
+        console.print("No results")
+        return
+
+    console.print(f"Search: {result.query_text}")
+    for row in result.results:
+        console.print(f"{row.rank}. {row.match_source}")
+        console.print(f"doc_id: {row.doc_id}")
+        console.print(f"revision_id: {row.revision_id}")
+        console.print(f"chunk_id: {row.chunk_id}")
+        console.print(f"source_path: {row.source_path or ''}")
+        console.print(f"snippet: {row.snippet}")
+
+
+@app.command()
+def tui(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    action: str | None = typer.Option(
+        None,
+        "--action",
+        help="TUI-lite action: dashboard, init, ingest, search, tasks, review, errors, settings.",
+    ),
+    source_input: Path | None = typer.Option(
+        None,
+        "--source",
+        help="Source file or folder for --action ingest.",
+    ),
+    query: str | None = typer.Option(
+        None,
+        "--query",
+        help="Search query for --action search.",
+    ),
+    recursive: bool = typer.Option(
+        False,
+        "--recursive",
+        help="Recursively ingest folders for --action ingest.",
+    ),
+    limit: int = typer.Option(
+        10,
+        "--limit",
+        min=1,
+        help="Maximum rows/results to show.",
+    ),
+    category_template: str = typer.Option(
+        "minimal",
+        "--category-template",
+        help=f"Category template for --action init: {', '.join(template_names())}.",
+    ),
+) -> None:
+    """Run the M4 guided CLI / TUI-lite surface."""
+    exit_code = run_tui_lite(
+        console=console,
+        vault=vault,
+        action=action,
+        source_input=source_input,
+        query=query,
+        recursive=recursive,
+        limit=limit,
+        category_template=category_template,
+    )
+    raise typer.Exit(exit_code)
+
+
+@catalog_app.command("list")
+def catalog_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    include_inactive: bool = typer.Option(
+        False,
+        "--include-inactive",
+        help="Include inactive or deleted categories.",
+    ),
+) -> None:
+    """List categories."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_categories(connection, include_inactive=include_inactive)
+
+    table = Table(title="Categories")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Active")
+    table.add_column("System")
+    for row in rows:
+        table.add_row(
+            row["category_id"],
+            row["name"],
+            _yes_no(row["is_active"]),
+            _yes_no(row["is_system"]),
+        )
+    console.print(table)
+
+
+@catalog_app.command("add")
+def catalog_add(
+    name: str = typer.Argument(..., help="Category name."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    description: str | None = typer.Option(
+        None,
+        "--description",
+        help="Optional category description.",
+    ),
+) -> None:
+    """Add a manual category."""
+    with _existing_vault_connection(vault) as connection:
+        category_id = add_category(connection, name=name, description=description)
+    console.print(f"Added category {category_id}: {name}")
+
+
+@catalog_app.command("update")
+def catalog_update(
+    category_id: str = typer.Argument(..., help="Category ID to update."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        help="Replacement category name.",
+    ),
+    description: str | None = typer.Option(
+        None,
+        "--description",
+        help="Replacement category description.",
+    ),
+    sort_order: int | None = typer.Option(
+        None,
+        "--sort-order",
+        help="Replacement category sort order.",
+    ),
+) -> None:
+    """Update a category without touching document revisions."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = update_category(
+                connection,
+                category_id,
+                name=name,
+                description=description,
+                sort_order=sort_order,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "updated" if result.changed else "unchanged"
+    console.print(f"Category {result.category_id}: {state}")
+
+
+@catalog_app.command("archive")
+def catalog_archive(
+    category_id: str = typer.Argument(..., help="Manual category ID to archive."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Archive an unused manual category without physical deletion."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = archive_category(connection, category_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "archived" if result.changed else "already archived"
+    console.print(f"Category {result.category_id}: {state}")
+
+
+@catalog_app.command("restore")
+def catalog_restore(
+    category_id: str = typer.Argument(..., help="Category ID to restore."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Restore an archived category."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = restore_category(connection, category_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "restored" if result.changed else "already active"
+    console.print(f"Category {result.category_id}: {state}")
+
+
+@tag_app.command("list")
+def tag_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    limit: int = typer.Option(
+        50,
+        "--limit",
+        min=1,
+        help="Maximum number of tags to show.",
+    ),
+    include_inactive: bool = typer.Option(
+        False,
+        "--include-inactive",
+        help="Include archived tags.",
+    ),
+) -> None:
+    """List manual tags."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_tags(connection, limit=limit, include_inactive=include_inactive)
+
+    table = Table(title="Tags")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Language")
+    table.add_column("Archived")
+    for row in rows:
+        table.add_row(row["tag_id"], row["name"], row["language"] or "", _yes_no(row["deleted_at"]))
+    console.print(table if rows else "No tags")
+
+
+@tag_app.command("add")
+def tag_add(
+    name: str = typer.Argument(..., help="Tag name."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    description: str | None = typer.Option(
+        None,
+        "--description",
+        help="Optional tag description.",
+    ),
+    language: str | None = typer.Option(
+        None,
+        "--language",
+        help="Optional tag language.",
+    ),
+) -> None:
+    """Add or reuse a manual tag."""
+    with _existing_vault_connection(vault) as connection:
+        tag_id = add_tag(connection, name, description=description, language=language)
+    console.print(f"Tag {tag_id}: {name}")
+
+
+@tag_app.command("update")
+def tag_update(
+    tag_id: str = typer.Argument(..., help="Tag ID to update."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        help="Replacement tag name.",
+    ),
+    description: str | None = typer.Option(
+        None,
+        "--description",
+        help="Replacement tag description.",
+    ),
+    language: str | None = typer.Option(
+        None,
+        "--language",
+        help="Replacement tag language.",
+    ),
+) -> None:
+    """Update a tag without touching document revisions."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = update_tag(
+                connection,
+                tag_id,
+                name=name,
+                description=description,
+                language=language,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "updated" if result.changed else "unchanged"
+    console.print(f"Tag {result.tag_id} {result.tag_name}: {state}")
+
+
+@tag_app.command("archive")
+def tag_archive(
+    tag_id: str = typer.Argument(..., help="Tag ID to archive."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Archive a tag without physical deletion."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = archive_tag(connection, tag_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "archived" if result.changed else "already archived"
+    console.print(f"Tag {result.tag_id} {result.tag_name}: {state}")
+
+
+@tag_app.command("restore")
+def tag_restore(
+    tag_id: str = typer.Argument(..., help="Tag ID to restore."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Restore an archived tag."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = restore_tag(connection, tag_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "restored" if result.changed else "already active"
+    console.print(f"Tag {result.tag_id} {result.tag_name}: {state}")
+
+
+@task_app.command("list")
+def task_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        min=1,
+        help="Maximum number of tasks to show.",
+    ),
+) -> None:
+    """List recent tasks."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_tasks(connection, limit=limit)
+
+    table = Table(title="Tasks")
+    table.add_column("ID")
+    table.add_column("Type")
+    table.add_column("Status")
+    table.add_column("Created")
+    for row in rows:
+        table.add_row(row["task_id"], row["type"], row["status"], row["created_at"])
+    console.print(table)
+
+
+@task_app.command("show")
+def task_show(
+    task_id: str = typer.Argument(..., help="Task ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Show one task and its events."""
+    with _existing_vault_connection(vault) as connection:
+        task = get_task(connection, task_id)
+        events = list_task_events(connection, task_id) if task is not None else []
+
+    if task is None:
+        console.print(f"[red]Task not found:[/red] {task_id}")
+        raise typer.Exit(1)
+
+    console.print(f"Task {task['task_id']}")
+    console.print(f"Type: {task['type']}")
+    console.print(f"Status: {task['status']}")
+    console.print(f"Created: {task['created_at']}")
+    if task["result_json"]:
+        console.print(f"Result: {task['result_json']}")
+    if task["error_json"]:
+        console.print(f"Error: {task['error_json']}")
+
+    table = Table(title="Task Events")
+    table.add_column("Created")
+    table.add_column("Type")
+    table.add_column("Message")
+    for event in events:
+        table.add_row(event["created_at"], event["event_type"] or "", event["message"] or "")
+    console.print(table)
+
+
+@index_app.command("status")
+def index_status(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Show current index state."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list(
+            connection.execute(
+                """
+                SELECT COALESCE(fts_status, 'unknown') AS fts_status, COUNT(*) AS count
+                FROM documents
+                WHERE status = 'active'
+                  AND deleted_at IS NULL
+                GROUP BY COALESCE(fts_status, 'unknown')
+                ORDER BY fts_status
+                """
+            )
+        )
+        current_chunks = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM chunks c
+            JOIN documents d ON d.doc_id = c.doc_id
+            WHERE d.status = 'active'
+              AND d.current_revision_id = c.revision_id
+              AND c.is_current = 1
+              AND c.deleted_at IS NULL
+            """
+        ).fetchone()["count"]
+        fts_rows = connection.execute("SELECT COUNT(*) AS count FROM chunks_fts").fetchone()["count"]
+        embedding_rows = list(
+            connection.execute(
+                """
+                SELECT COALESCE(embedding_status, 'unknown') AS embedding_status, COUNT(*) AS count
+                FROM documents
+                WHERE status = 'active'
+                  AND deleted_at IS NULL
+                GROUP BY COALESCE(embedding_status, 'unknown')
+                ORDER BY embedding_status
+                """
+            )
+        )
+        vector_rows = list(
+            connection.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM embeddings
+                WHERE deleted_at IS NULL
+                GROUP BY status
+                ORDER BY status
+                """
+            )
+        )
+
+    table = Table(title="Index Status")
+    table.add_column("FTS Status")
+    table.add_column("Documents", justify="right")
+    for row in rows:
+        table.add_row(row["fts_status"], str(row["count"]))
+    if not rows:
+        table.add_row("none", "0")
+    console.print(table)
+    console.print(f"Current chunks: {current_chunks}")
+    console.print(f"FTS rows: {fts_rows}")
+    embedding_table = Table(title="Embedding Status")
+    embedding_table.add_column("Embedding Status")
+    embedding_table.add_column("Documents", justify="right")
+    for row in embedding_rows:
+        embedding_table.add_row(row["embedding_status"], str(row["count"]))
+    if not embedding_rows:
+        embedding_table.add_row("none", "0")
+    console.print(embedding_table)
+    vector_table = Table(title="Embedding Rows")
+    vector_table.add_column("Row Status")
+    vector_table.add_column("Rows", justify="right")
+    for row in vector_rows:
+        vector_table.add_row(row["status"], str(row["count"]))
+    if not vector_rows:
+        vector_table.add_row("none", "0")
+    console.print(vector_table)
+
+
+@index_app.command("rebuild")
+def index_rebuild(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    fts: bool = typer.Option(
+        False,
+        "--fts",
+        help="Rebuild the SQLite FTS index.",
+    ),
+    vectors: bool = typer.Option(
+        False,
+        "--vectors",
+        help="Rebuild deterministic local vectors for active current chunks.",
+    ),
+) -> None:
+    """Rebuild supported local indexes."""
+    if not fts and not vectors:
+        console.print("[red]No supported index selected.[/red] Use --fts or --vectors.")
+        raise typer.Exit(2)
+
+    exit_code = 0
+    with _existing_vault_connection(vault) as connection:
+        if fts:
+            result = rebuild_fts_index(connection, vault)
+
+            console.print("FTS rebuild complete")
+            console.print(f"Active documents: {result.active_documents}")
+            console.print(f"Indexed documents: {result.indexed_documents}")
+            console.print(f"Indexed chunks: {result.indexed_chunks}")
+            console.print(f"Failed documents: {result.failed_documents}")
+
+            if result.failures:
+                table = Table(title="FTS Index Failures")
+                table.add_column("Doc ID")
+                table.add_column("Reason")
+                table.add_column("Error ID")
+                for failure in result.failures:
+                    table.add_row(failure.doc_id, failure.reason, failure.error_id)
+                console.print(table)
+                exit_code = 2
+
+        if vectors:
+            vector_result = rebuild_vector_index(connection)
+            console.print("Vector rebuild complete")
+            console.print(f"Task: {vector_result.task_id}")
+            console.print(f"Provider: {vector_result.provider}")
+            console.print(f"Model: {vector_result.model}")
+            console.print(f"Dimension: {vector_result.dimension}")
+            console.print(f"Current chunks: {vector_result.current_chunks}")
+            console.print(f"Embedded chunks: {vector_result.embedded_chunks}")
+            console.print(f"Failed chunks: {vector_result.failed_chunks}")
+
+            if vector_result.failures:
+                table = Table(title="Vector Index Failures")
+                table.add_column("Doc ID")
+                table.add_column("Chunk ID")
+                table.add_column("Reason")
+                table.add_column("Error ID")
+                for failure in vector_result.failures:
+                    table.add_row(failure.doc_id, failure.chunk_id, failure.reason, failure.error_id)
+                console.print(table)
+                exit_code = 2
+
+    if exit_code:
+        raise typer.Exit(2)
+
+
+@doc_app.command("list")
+def doc_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    status: str = typer.Option(
+        "active",
+        "--status",
+        help="Document status: active, archived, or all.",
+    ),
+    category_id: str | None = typer.Option(
+        None,
+        "--category-id",
+        help="Filter by category ID.",
+    ),
+    tag: str | None = typer.Option(
+        None,
+        "--tag",
+        help="Filter by active manual tag name.",
+    ),
+    limit: int = typer.Option(
+        50,
+        "--limit",
+        min=1,
+        help="Maximum number of documents to show.",
+    ),
+) -> None:
+    """List documents by active/archive status and manual metadata."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            rows = list_documents(
+                connection,
+                status=status,
+                category_id=category_id,
+                tag=tag,
+                limit=limit,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    if not rows:
+        console.print("No documents")
+        return
+
+    table = Table(title="Documents")
+    table.add_column("ID")
+    table.add_column("Title")
+    table.add_column("Status")
+    table.add_column("Category")
+    table.add_column("Tags")
+    table.add_column("FTS")
+    table.add_column("Updated")
+    for row in rows:
+        table.add_row(
+            row["doc_id"],
+            row["title"] or "",
+            row["status"] or "",
+            row["category_name"] or row["category_id"] or "",
+            row["tags"] or "",
+            row["fts_status"] or "",
+            row["updated_at"] or row["created_at"] or "",
+        )
+    console.print(table)
+    for row in rows:
+        console.print(
+            f"doc: {row['doc_id']} status={row['status']} "
+            f"category={row['category_name'] or row['category_id'] or ''} "
+            f"tags={row['tags'] or ''} title={row['title'] or ''}"
+        )
+
+
+@doc_app.command("archive")
+def doc_archive(
+    doc_id: str = typer.Argument(..., help="Document ID to archive."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Archive a document without deleting files, revisions, chunks, or FTS rows."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = archive_document(connection, doc_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "archived" if result.changed else "already archived"
+    console.print(f"Document {result.doc_id}: {state}")
+
+
+@doc_app.command("set-category")
+def doc_set_category(
+    doc_id: str = typer.Argument(..., help="Document ID to update."),
+    category_id: str = typer.Argument(..., help="Category ID to set."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Set a document category without mutating revision Markdown."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = set_document_category(connection, doc_id, category_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "updated" if result.changed else "unchanged"
+    console.print(f"Document {result.doc_id} category: {result.category_id} ({state})")
+
+
+@doc_app.command("add-tag")
+def doc_add_tag(
+    doc_id: str = typer.Argument(..., help="Document ID to tag."),
+    tag: str = typer.Argument(..., help="Tag name."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Add a manual tag to a document."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = add_document_tag(connection, doc_id, tag)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "added" if result.changed else "already present"
+    console.print(f"Document {result.doc_id} tag {result.tag_name}: {state}")
+
+
+@doc_app.command("remove-tag")
+def doc_remove_tag(
+    doc_id: str = typer.Argument(..., help="Document ID to update."),
+    tag: str = typer.Argument(..., help="Tag name."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Remove a manual tag from a document."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = remove_document_tag(connection, doc_id, tag)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "removed" if result.changed else "not present"
+    console.print(f"Document {result.doc_id} tag {result.tag_name}: {state}")
+
+
+@doc_app.command("tags")
+def doc_tags(
+    doc_id: str = typer.Argument(..., help="Document ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """List manual tags on a document."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            rows = list_document_tags(connection, doc_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    table = Table(title=f"Document Tags: {doc_id}")
+    table.add_column("Tag ID")
+    table.add_column("Name")
+    table.add_column("Source")
+    for row in rows:
+        table.add_row(row["tag_id"], row["name"], row["source"] or "")
+    console.print(table if rows else "No document tags")
+
+
+@doc_app.command("show")
+def doc_show(
+    doc_id: str = typer.Argument(..., help="Document ID to show."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Show document metadata and durable file paths."""
+    with _existing_vault_connection(vault) as connection:
+        row = _load_document_for_cli(connection, doc_id)
+    if row is None:
+        console.print(f"[red]Document not found:[/red] {doc_id}")
+        raise typer.Exit(1)
+    _print_key_values(
+        {
+            "doc_id": row["doc_id"],
+            "title": row["title"],
+            "status": row["status"],
+            "archived_at": row["archived_at"],
+            "current_revision_id": row["current_revision_id"],
+            "source_type": row["source_type"],
+            "source_uri": row["source_uri"],
+            "canonical_path": row["canonical_path"],
+            "original_path": row["original_path"],
+            "ingest_status": row["ingest_status"],
+            "fts_status": row["fts_status"],
+            "quality_status": row["quality_status"],
+            "needs_review": bool(row["needs_review"]),
+            "category_id": row["category_id"],
+        }
+    )
+
+
+@doc_app.command("revisions")
+def doc_revisions(
+    doc_id: str = typer.Argument(..., help="Document ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """List immutable revisions for a document."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            rows = list_document_revisions(connection, doc_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    table = Table(title=f"Document Revisions: {doc_id}")
+    table.add_column("Seq", justify="right")
+    table.add_column("Current")
+    table.add_column("Revision ID")
+    table.add_column("Chunks", justify="right")
+    table.add_column("Markdown Path", overflow="fold")
+    for row in rows:
+        table.add_row(
+            str(row["sequence"]),
+            _yes_no(row["is_current"]),
+            row["revision_id"],
+            str(row["chunk_count"] or 0),
+            row["markdown_path"],
+        )
+    console.print(table if rows else "No revisions")
+    for row in rows:
+        console.print(f"revision_path: {row['markdown_path']}")
+
+
+@doc_app.command("open")
+def doc_open(
+    doc_id: str = typer.Argument(..., help="Document ID to open."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    original: bool = typer.Option(
+        False,
+        "--original",
+        help="Open the archived original instead of source Markdown.",
+    ),
+    folder: bool = typer.Option(
+        False,
+        "--folder",
+        help="Open the containing folder.",
+    ),
+    revision_id: str | None = typer.Option(
+        None,
+        "--revision",
+        help="Open a specific revision Markdown file.",
+    ),
+    print_path: bool = typer.Option(
+        False,
+        "--print-path",
+        help="Print the resolved path without launching it.",
+    ),
+) -> None:
+    """Open source Markdown, an archived original, a folder, or a specific revision."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            target = _resolve_doc_open_target(
+                connection,
+                vault,
+                doc_id,
+                original=original,
+                folder=folder,
+                revision_id=revision_id,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    if print_path:
+        console.print(str(target))
+        return
+    typer.launch(str(target))
+    console.print(str(target))
+
+
+@doc_app.command("restore")
+def doc_restore(
+    doc_id: str = typer.Argument(..., help="Document ID to restore."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Restore an archived document to active search results."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = restore_document(connection, doc_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    state = "restored" if result.changed else "already active"
+    console.print(f"Document {result.doc_id}: {state}")
+
+
+@review_app.command("list")
+def review_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    status: str = typer.Option(
+        "pending",
+        "--status",
+        help="Review status to show, or 'all'.",
+    ),
+    review_type: str | None = typer.Option(
+        None,
+        "--type",
+        help="Filter by review item type.",
+    ),
+    target_type: str | None = typer.Option(
+        None,
+        "--target-type",
+        help="Filter by target type.",
+    ),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        min=1,
+        help="Maximum number of review items to show.",
+    ),
+) -> None:
+    """List review queue items."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_review_items(
+            connection,
+            status=None if status == "all" else status,
+            review_type=review_type,
+            target_type=target_type,
+            limit=limit,
+        )
+
+    console.print("Review Items")
+    if not rows:
+        console.print("No review items")
+        return
+    for row in rows:
+        console.print(f"review_id: {row['review_id']}")
+        console.print(f"type: {row['type']}")
+        console.print(f"target: {row['target_type']}:{row['target_id']}")
+        console.print(f"status: {row['status']}")
+        console.print(f"priority: {row['priority'] or ''}")
+        console.print(f"created_at: {row['created_at']}")
+        if row["resolved_at"]:
+            console.print(f"resolved_at: {row['resolved_at']}")
+        if row["resolved_by"]:
+            console.print(f"resolved_by: {row['resolved_by']}")
+        if row["resolution_note"]:
+            console.print(f"resolution_note: {row['resolution_note']}")
+        console.print(f"reason: {row['reason'] or ''}")
+
+
+@review_app.command("show")
+def review_show(
+    review_id: str = typer.Argument(..., help="Review item ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Show one review item."""
+    with _existing_vault_connection(vault) as connection:
+        row = get_review_item(connection, review_id)
+    if row is None:
+        console.print(f"[red]Review item not found:[/red] {review_id}")
+        raise typer.Exit(1)
+    _print_key_values(
+        {
+            "review_id": row["review_id"],
+            "type": row["type"],
+            "target_type": row["target_type"],
+            "target_id": row["target_id"],
+            "priority": row["priority"],
+            "reason": row["reason"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "resolved_at": row["resolved_at"],
+            "resolution_note": row["resolution_note"],
+            "resolved_by": row["resolved_by"],
+        }
+    )
+
+
+@review_app.command("resolve")
+def review_resolve(
+    review_id: str = typer.Argument(..., help="Review item ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    note: str | None = typer.Option(
+        None,
+        "--note",
+        help="Resolution note.",
+    ),
+    resolved_by: str | None = typer.Option(
+        None,
+        "--resolved-by",
+        help="Resolver identifier.",
+    ),
+) -> None:
+    """Mark a review item resolved without applying hidden fixes."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            row = resolve_review_item(connection, review_id, note=note, resolved_by=resolved_by)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    console.print(f"Review {row['review_id']}: {row['status']}")
+
+
+@review_app.command("resolve-many")
+def review_resolve_many(
+    review_ids: list[str] = typer.Argument(..., help="Review item IDs."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    note: str | None = typer.Option(
+        None,
+        "--note",
+        help="Resolution note applied to each review item.",
+    ),
+    resolved_by: str | None = typer.Option(
+        None,
+        "--resolved-by",
+        help="Resolver identifier.",
+    ),
+) -> None:
+    """Resolve multiple review items without applying hidden fixes."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            rows = resolve_review_items(connection, review_ids, note=note, resolved_by=resolved_by)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    console.print(f"Resolved review items: {len(rows)}")
+    for row in rows:
+        console.print(f"review_id: {row['review_id']} status: {row['status']}")
+
+
+@error_app.command("list")
+def error_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    component: str | None = typer.Option(
+        None,
+        "--component",
+        help="Filter by component.",
+    ),
+    severity: str | None = typer.Option(
+        None,
+        "--severity",
+        help="Filter by severity.",
+    ),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        min=1,
+        help="Maximum number of errors to show.",
+    ),
+) -> None:
+    """List recorded errors."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_errors(connection, component=component, severity=severity, limit=limit)
+
+    console.print("Errors")
+    if not rows:
+        console.print("No errors")
+        return
+    for row in rows:
+        console.print(f"error_id: {row['error_id']}")
+        console.print(f"component: {row['component'] or ''}")
+        console.print(f"error_type: {row['error_type'] or ''}")
+        console.print(f"severity: {row['severity'] or ''}")
+        console.print(f"retryable: {_yes_no(row['retryable'])}")
+        console.print(f"created_at: {row['created_at']}")
+        console.print(f"message: {row['message'] or row['user_message'] or ''}")
+
+
+@error_app.command("show")
+def error_show(
+    error_id: str = typer.Argument(..., help="Error ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Show one recorded error."""
+    with _existing_vault_connection(vault) as connection:
+        row = get_error(connection, error_id)
+    if row is None:
+        console.print(f"[red]Error not found:[/red] {error_id}")
+        raise typer.Exit(1)
+    _print_key_values(
+        {
+            "error_id": row["error_id"],
+            "task_id": row["task_id"],
+            "component": row["component"],
+            "error_type": row["error_type"],
+            "severity": row["severity"],
+            "retryable": bool(row["retryable"]),
+            "user_message": row["user_message"],
+            "developer_message": row["developer_message"],
+            "message": row["message"],
+            "payload_json": row["payload_json"],
+            "created_at": row["created_at"],
+        }
+    )
+
+
+@ocr_app.command("run")
+def ocr_run(
+    doc_id: str = typer.Argument(..., help="Document ID to OCR."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    engine: str = typer.Option(
+        "sidecar",
+        "--engine",
+        help="OCR engine. M6.2 supports sidecar for deterministic local OCR text.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Allow OCR to create a new current revision when the document already has one.",
+    ),
+) -> None:
+    """Run explicit OCR for a document archived original."""
+    with _existing_vault_connection(vault) as connection:
+        result = run_ocr_for_document(connection, vault, doc_id, engine=engine, force=force)
+    console.print(f"OCR task: {result.task_id}")
+    console.print(f"Document: {result.doc_id}")
+    console.print(f"Status: {result.status}")
+    console.print(f"Engine: {result.engine}")
+    console.print(f"Pages: {result.page_count}")
+    console.print(f"Revision: {result.revision_id or ''}")
+    console.print(f"Chunks: {result.chunk_count}")
+    console.print(f"Indexed chunks: {result.indexed_chunks}")
+    console.print(f"Review items: {result.review_items}")
+    if result.error_id:
+        console.print(f"Error: {result.error_id}")
+    if result.status == "blocked":
+        raise typer.Exit(1)
+    if result.status == "failed":
+        raise typer.Exit(2)
+    if result.status == "completed_with_issues":
+        raise typer.Exit(1)
+
+
+@ocr_app.command("pages")
+def ocr_pages(
+    doc_id: str = typer.Argument(..., help="Document ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        min=1,
+        help="Maximum pages to show.",
+    ),
+) -> None:
+    """List OCR page records for a document."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_ocr_pages(connection, doc_id)[:limit]
+    if not rows:
+        console.print("No OCR pages")
+        return
+    table = Table(title=f"OCR Pages: {doc_id}")
+    table.add_column("Page", justify="right")
+    table.add_column("Revision ID")
+    table.add_column("Confidence")
+    table.add_column("Quality")
+    table.add_column("Engine")
+    table.add_column("Text", overflow="fold")
+    for row in rows:
+        text = " ".join(str(row["text"] or "").split())
+        table.add_row(
+            str(row["page_number"]),
+            row["revision_id"],
+            "" if row["confidence"] is None else f"{float(row['confidence']):.2f}",
+            row["quality_status"] or "",
+            row["engine"] or "",
+            text[:160],
+        )
+    console.print(table)
+    for row in rows:
+        console.print(f"ocr_page: {row['ocr_page_id']} page={row['page_number']} revision={row['revision_id']}")
+
+
+@classification_app.command("suggest")
+def classify_suggest(
+    doc_id: str | None = typer.Argument(None, help="Optional document ID to classify."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    min_confidence: float = typer.Option(
+        0.65,
+        "--min-confidence",
+        min=0.0,
+        max=1.0,
+        help="Minimum confidence required to create a pending suggestion.",
+    ),
+    limit: int = typer.Option(
+        50,
+        "--limit",
+        min=1,
+        help="Maximum active current documents to scan.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Supersede pending local suggestions for the same current revision.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Create pending local category/tag suggestions without applying them."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = suggest_classifications(
+                connection,
+                doc_id=doc_id,
+                min_confidence=min_confidence,
+                limit=limit,
+                force=force,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "task_id": result.task_id,
+        "scanned_documents": result.scanned_documents,
+        "suggested_documents": result.suggested_documents,
+        "skipped_documents": result.skipped_documents,
+        "review_items": result.review_items,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Classification task: {result.task_id}")
+    console.print(f"Scanned documents: {result.scanned_documents}")
+    console.print(f"Suggested documents: {result.suggested_documents}")
+    console.print(f"Skipped documents: {result.skipped_documents}")
+    console.print(f"Review items: {result.review_items}")
+
+
+@classification_app.command("list")
+def classify_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    status: str = typer.Option(
+        "pending",
+        "--status",
+        help="Suggestion status to show, or 'all'.",
+    ),
+    doc_id: str | None = typer.Option(
+        None,
+        "--doc-id",
+        help="Filter by document ID.",
+    ),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        min=1,
+        help="Maximum suggestions to show.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """List classification suggestions."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_classification_suggestions(
+            connection,
+            status=None if status == "all" else status,
+            doc_id=doc_id,
+            limit=limit,
+            active_current_only=status != "all",
+        )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_id": row["suggestion_id"],
+                            "doc_id": row["doc_id"],
+                            "revision_id": row["revision_id"],
+                            "title": row["title"],
+                            "suggested_category_id": row["suggested_category_id"],
+                            "suggested_category_name": row["suggested_category_name"],
+                            "confidence": row["confidence"],
+                            "reason": row["reason"],
+                            "suggested_tags": _json_list_for_cli(row["suggested_tags_json"]),
+                            "needs_user_confirmation": bool(row["needs_user_confirmation"]),
+                            "model": row["model"],
+                            "prompt_version": row["prompt_version"],
+                            "status": row["status"],
+                            "created_at": row["created_at"],
+                        }
+                        for row in rows
+                    ]
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if not rows:
+        console.print("No classification suggestions")
+        return
+    table = Table(title="Classification Suggestions")
+    table.add_column("ID")
+    table.add_column("Doc")
+    table.add_column("Category")
+    table.add_column("Tags")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Status")
+    for row in rows:
+        table.add_row(
+            row["suggestion_id"],
+            row["doc_id"],
+            row["suggested_category_name"] or row["suggested_category_id"] or "",
+            ", ".join(_json_list_for_cli(row["suggested_tags_json"])),
+            "" if row["confidence"] is None else f"{float(row['confidence']):.2f}",
+            row["status"],
+        )
+    console.print(table)
+    for row in rows:
+        console.print(f"suggestion: {row['suggestion_id']} doc={row['doc_id']} status={row['status']}")
+
+
+@classification_app.command("show")
+def classify_show(
+    suggestion_id: str = typer.Argument(..., help="Classification suggestion ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Show one classification suggestion."""
+    with _existing_vault_connection(vault) as connection:
+        row = get_classification_suggestion(connection, suggestion_id)
+    if row is None or row["deleted_at"] is not None:
+        console.print(f"[red]Classification suggestion not found:[/red] {suggestion_id}")
+        raise typer.Exit(1)
+    _print_key_values(
+        {
+            "suggestion_id": row["suggestion_id"],
+            "doc_id": row["doc_id"],
+            "revision_id": row["revision_id"],
+            "title": row["title"],
+            "current_revision_id": row["current_revision_id"],
+            "document_status": row["document_status"],
+            "current_category_id": row["current_category_id"],
+            "suggested_category_id": row["suggested_category_id"],
+            "suggested_category_name": row["suggested_category_name"],
+            "confidence": row["confidence"],
+            "reason": row["reason"],
+            "alternative_category_ids_json": row["alternative_category_ids_json"],
+            "suggested_tags_json": row["suggested_tags_json"],
+            "needs_user_confirmation": bool(row["needs_user_confirmation"]),
+            "model": row["model"],
+            "prompt_version": row["prompt_version"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+    )
+
+
+@classification_app.command("accept")
+def classify_accept(
+    suggestion_id: str = typer.Argument(..., help="Classification suggestion ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    no_category: bool = typer.Option(
+        False,
+        "--no-category",
+        help="Accept only suggested tags.",
+    ),
+    no_tags: bool = typer.Option(
+        False,
+        "--no-tags",
+        help="Accept only the suggested category.",
+    ),
+    force_category: bool = typer.Option(
+        False,
+        "--force-category",
+        help="Allow replacing a non-uncategorized existing category.",
+    ),
+    reason: str | None = typer.Option(
+        None,
+        "--reason",
+        help="Feedback reason.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Accept a pending suggestion and record classification feedback."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = accept_classification_suggestion(
+                connection,
+                suggestion_id,
+                apply_category=not no_category,
+                apply_tags=not no_tags,
+                force_category=force_category,
+                reason=reason,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "suggestion_id": result.suggestion_id,
+        "doc_id": result.doc_id,
+        "status": result.status,
+        "category_changed": result.category_changed,
+        "tags_added": list(result.tags_added),
+        "feedback_id": result.feedback_id,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Classification suggestion {result.suggestion_id}: accepted")
+    console.print(f"Document: {result.doc_id}")
+    console.print(f"Category changed: {_yes_no(result.category_changed)}")
+    console.print(f"Tags added: {', '.join(result.tags_added)}")
+    console.print(f"Feedback: {result.feedback_id}")
+
+
+@classification_app.command("reject")
+def classify_reject(
+    suggestion_id: str = typer.Argument(..., help="Classification suggestion ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    reason: str | None = typer.Option(
+        None,
+        "--reason",
+        help="Feedback reason.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Reject a pending suggestion and record classification feedback."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = reject_classification_suggestion(connection, suggestion_id, reason=reason)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "suggestion_id": result.suggestion_id,
+        "doc_id": result.doc_id,
+        "status": result.status,
+        "category_changed": result.category_changed,
+        "tags_added": list(result.tags_added),
+        "feedback_id": result.feedback_id,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Classification suggestion {result.suggestion_id}: rejected")
+    console.print(f"Document: {result.doc_id}")
+    console.print(f"Feedback: {result.feedback_id}")
+
+
+@translation_app.command("document")
+def translate_document(
+    doc_id: str = typer.Argument(..., help="Source document ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    revision_id: str = typer.Option(
+        ...,
+        "--revision",
+        help="Current source revision ID to translate from.",
+    ),
+    target_language: str = typer.Option(
+        ...,
+        "--target-language",
+        help="Target language for the translation output.",
+    ),
+    source_language: str | None = typer.Option(
+        None,
+        "--source-language",
+        help="Optional source language override.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Translate every current chunk in a document into one output Markdown file."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = translate_full_document(
+                connection,
+                vault,
+                doc_id=doc_id,
+                revision_id=revision_id,
+                source_language=source_language,
+                target_language=target_language,
+            )
+        except Exception as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "translation_id": result.translation_id,
+        "execution_id": result.execution_id,
+        "task_id": result.task_id,
+        "source_doc_id": result.source_doc_id,
+        "source_revision_id": result.source_revision_id,
+        "source_chunk_ids": list(result.source_chunk_ids),
+        "target_language": result.target_language,
+        "output_path": result.output_path,
+        "status": result.status,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Translation: {result.translation_id}")
+    console.print(f"Execution: {result.execution_id}")
+    console.print(f"Task: {result.task_id}")
+    console.print(f"Document: {result.source_doc_id}")
+    console.print(f"Revision: {result.source_revision_id}")
+    console.print(f"Chunks: {', '.join(result.source_chunk_ids)}")
+    console.print(f"Target language: {result.target_language}")
+    console.print(f"Output: {result.output_path}")
+
+
+@translation_app.command("chunks")
+def translate_chunks(
+    doc_id: str = typer.Argument(..., help="Source document ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    revision_id: str = typer.Option(
+        ...,
+        "--revision",
+        help="Current source revision ID to translate from.",
+    ),
+    chunk_ids: list[str] | None = typer.Option(
+        None,
+        "--chunk",
+        help="Source chunk ID to translate. Repeat for multiple selected chunks.",
+    ),
+    target_language: str = typer.Option(
+        ...,
+        "--target-language",
+        help="Target language for the translation output.",
+    ),
+    source_language: str | None = typer.Option(
+        None,
+        "--source-language",
+        help="Optional source language override.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Translate selected current chunks into an output Markdown file."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = translate_selected_chunks(
+                connection,
+                vault,
+                doc_id=doc_id,
+                revision_id=revision_id,
+                chunk_ids=tuple(chunk_ids or ()),
+                source_language=source_language,
+                target_language=target_language,
+            )
+        except Exception as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "translation_id": result.translation_id,
+        "execution_id": result.execution_id,
+        "task_id": result.task_id,
+        "source_doc_id": result.source_doc_id,
+        "source_revision_id": result.source_revision_id,
+        "source_chunk_ids": list(result.source_chunk_ids),
+        "target_language": result.target_language,
+        "output_path": result.output_path,
+        "status": result.status,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Translation: {result.translation_id}")
+    console.print(f"Execution: {result.execution_id}")
+    console.print(f"Task: {result.task_id}")
+    console.print(f"Document: {result.source_doc_id}")
+    console.print(f"Revision: {result.source_revision_id}")
+    console.print(f"Chunks: {', '.join(result.source_chunk_ids)}")
+    console.print(f"Target language: {result.target_language}")
+    console.print(f"Output: {result.output_path}")
+
+
+@translation_app.command("list")
+def translate_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    doc_id: str | None = typer.Option(
+        None,
+        "--doc-id",
+        help="Filter by source document ID.",
+    ),
+    status: str | None = typer.Option(
+        None,
+        "--status",
+        help="Filter by translation status.",
+    ),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        min=1,
+        help="Maximum translations to show.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """List translation outputs."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_translations(connection, doc_id=doc_id, status=status, limit=limit)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "translations": [
+                        {
+                            "translation_id": row["translation_id"],
+                            "execution_id": row["execution_id"],
+                            "source_doc_id": row["source_doc_id"],
+                            "source_revision_id": row["source_revision_id"],
+                            "source_chunk_ids": _json_list_for_cli(row["source_chunk_ids_json"]),
+                            "target_language": row["target_language"],
+                            "output_path": row["output_path"],
+                            "status": row["status"],
+                            "created_at": row["created_at"],
+                        }
+                        for row in rows
+                    ]
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if not rows:
+        console.print("No translations")
+        return
+    table = Table(title="Translations")
+    table.add_column("ID")
+    table.add_column("Doc")
+    table.add_column("Revision")
+    table.add_column("Target")
+    table.add_column("Status")
+    table.add_column("Output")
+    for row in rows:
+        table.add_row(
+            row["translation_id"],
+            row["source_doc_id"],
+            row["source_revision_id"],
+            row["target_language"] or "",
+            row["status"] or "",
+            row["output_path"] or "",
+        )
+    console.print(table)
+    for row in rows:
+        console.print(f"translation: {row['translation_id']} doc={row['source_doc_id']} status={row['status']}")
+
+
+@translation_app.command("show")
+def translate_show(
+    translation_id: str = typer.Argument(..., help="Translation ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Show one translation record."""
+    with _existing_vault_connection(vault) as connection:
+        row = get_translation(connection, translation_id)
+    if row is None or row["deleted_at"] is not None:
+        console.print(f"[red]Translation not found:[/red] {translation_id}")
+        raise typer.Exit(1)
+    _print_key_values(
+        {
+            "translation_id": row["translation_id"],
+            "execution_id": row["execution_id"],
+            "source_doc_id": row["source_doc_id"],
+            "source_revision_id": row["source_revision_id"],
+            "source_chunk_ids_json": row["source_chunk_ids_json"],
+            "source_language": row["source_language"],
+            "target_language": row["target_language"],
+            "translation_mode": row["translation_mode"],
+            "output_path": row["output_path"],
+            "model": row["model"],
+            "prompt_version": row["prompt_version"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+    )
+
+
+@translation_app.command("open")
+def translate_open(
+    translation_id: str = typer.Argument(..., help="Translation ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    folder: bool = typer.Option(
+        False,
+        "--folder",
+        help="Open the containing folder.",
+    ),
+    print_path: bool = typer.Option(
+        False,
+        "--print-path",
+        help="Print the resolved path without launching it.",
+    ),
+) -> None:
+    """Open a translation output file or print its resolved path."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            target = resolve_translation_output_path(connection, vault, translation_id, folder=folder)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    if print_path:
+        console.print(str(target))
+        return
+    typer.launch(str(target))
+    console.print(str(target))
+
+
+@card_app.command("generate")
+def card_generate(
+    doc_id: str = typer.Argument(..., help="Source document ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    revision_id: str | None = typer.Option(
+        None,
+        "--revision",
+        help="Current source revision ID. Defaults to the document current revision.",
+    ),
+    max_claims: int = typer.Option(
+        3,
+        "--max-claims",
+        min=1,
+        help="Maximum deterministic claim records to create.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Create a source-bound candidate card record without writing an atomic note."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = generate_candidate_card(
+                connection,
+                doc_id=doc_id,
+                revision_id=revision_id,
+                max_claims=max_claims,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "candidate_card_id": result.candidate_card_id,
+        "task_id": result.task_id,
+        "source_doc_id": result.source_doc_id,
+        "source_revision_id": result.source_revision_id,
+        "source_chunk_ids": list(result.source_chunk_ids),
+        "claims_count": result.claims_count,
+        "status": result.status,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Candidate card: {result.candidate_card_id}")
+    console.print(f"Task: {result.task_id}")
+    console.print(f"Document: {result.source_doc_id}")
+    console.print(f"Revision: {result.source_revision_id}")
+    console.print(f"Claims: {result.claims_count}")
+    console.print(f"Status: {result.status}")
+
+
+@card_app.command("list")
+def card_list(
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    doc_id: str | None = typer.Option(
+        None,
+        "--doc-id",
+        help="Filter by source document ID.",
+    ),
+    status: str = typer.Option(
+        "reviewing",
+        "--status",
+        help="Filter by status, or use 'all'.",
+    ),
+    include_stale: bool = typer.Option(
+        False,
+        "--include-stale",
+        help="Include cards bound to old revisions or archived documents.",
+    ),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        min=1,
+        help="Maximum candidate cards to show.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """List candidate card records. Defaults to active current documents only."""
+    status_filter = None if status == "all" else status
+    with _existing_vault_connection(vault) as connection:
+        rows = list_candidate_cards(
+            connection,
+            doc_id=doc_id,
+            status=status_filter,
+            limit=limit,
+            active_current_only=not include_stale,
+        )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "candidate_cards": [
+                        {
+                            "candidate_card_id": row["candidate_card_id"],
+                            "source_doc_id": row["source_doc_id"],
+                            "source_revision_id": row["source_revision_id"],
+                            "title": row["title"],
+                            "claims_count": len(_json_array_for_cli(row["claims_json"])),
+                            "source_count": row["source_count"],
+                            "status": row["status"],
+                            "created_at": row["created_at"],
+                        }
+                        for row in rows
+                    ]
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if not rows:
+        console.print("No candidate cards")
+        return
+    table = Table(title="Candidate Cards")
+    table.add_column("ID")
+    table.add_column("Doc")
+    table.add_column("Revision")
+    table.add_column("Claims")
+    table.add_column("Sources")
+    table.add_column("Status")
+    for row in rows:
+        table.add_row(
+            row["candidate_card_id"],
+            row["source_doc_id"],
+            row["source_revision_id"],
+            str(len(_json_array_for_cli(row["claims_json"]))),
+            str(row["source_count"]),
+            row["status"],
+        )
+    console.print(table)
+    for row in rows:
+        console.print(f"candidate_card: {row['candidate_card_id']} doc={row['source_doc_id']} status={row['status']}")
+
+
+@card_app.command("show")
+def card_show(
+    candidate_card_id: str = typer.Argument(..., help="Candidate card ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Show one candidate card and its source chunk bindings."""
+    with _existing_vault_connection(vault) as connection:
+        row = get_candidate_card(connection, candidate_card_id)
+        if row is None or row["deleted_at"] is not None:
+            console.print(f"[red]Candidate card not found:[/red] {candidate_card_id}")
+            raise typer.Exit(1)
+        sources = list_candidate_card_sources(connection, candidate_card_id)
+    claims = _json_array_for_cli(row["claims_json"])
+    source_payload = [
+        {
+            "source_chunk_id": source["source_chunk_id"],
+            "claim_id": source["claim_id"],
+            "quote": source["quote"],
+        }
+        for source in sources
+    ]
+    payload = {
+        "candidate_card_id": row["candidate_card_id"],
+        "source_doc_id": row["source_doc_id"],
+        "source_revision_id": row["source_revision_id"],
+        "title": row["title"],
+        "claims": claims,
+        "sources": source_payload,
+        "model": row["model"],
+        "prompt_version": row["prompt_version"],
+        "status": row["status"],
+        "accepted_note_path": row["accepted_note_path"],
+        "document_status": row["document_status"],
+        "current_revision_id": row["current_revision_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    _print_key_values(
+        {
+            "candidate_card_id": row["candidate_card_id"],
+            "source_doc_id": row["source_doc_id"],
+            "source_revision_id": row["source_revision_id"],
+            "title": row["title"],
+            "claims_count": len(claims),
+            "source_count": len(sources),
+            "model": row["model"],
+            "prompt_version": row["prompt_version"],
+            "status": row["status"],
+            "accepted_note_path": row["accepted_note_path"],
+            "document_status": row["document_status"],
+            "current_revision_id": row["current_revision_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+    )
+    for source in sources:
+        console.print(f"source_chunk_id: {source['source_chunk_id']} claim_id: {source['claim_id']}")
+
+
+@card_app.command("accept")
+def card_accept(
+    candidate_card_id: str = typer.Argument(..., help="Candidate card ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    reviewer: str = typer.Option(
+        "cli",
+        "--reviewer",
+        help="Reviewer identifier for task input metadata.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Accept a reviewing candidate card and write an atomic note."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = accept_candidate_card(connection, vault, candidate_card_id, reviewer=reviewer)
+        except (FileExistsError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "candidate_card_id": result.candidate_card_id,
+        "task_id": result.task_id,
+        "source_doc_id": result.source_doc_id,
+        "source_revision_id": result.source_revision_id,
+        "status": result.status,
+        "accepted_note_path": result.accepted_note_path,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Candidate card {result.candidate_card_id}: accepted")
+    console.print(f"Task: {result.task_id}")
+    console.print(f"Atomic note: {result.accepted_note_path}")
+
+
+@card_app.command("reject")
+def card_reject(
+    candidate_card_id: str = typer.Argument(..., help="Candidate card ID."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    reason: str | None = typer.Option(
+        None,
+        "--reason",
+        help="Optional rejection reason.",
+    ),
+    reviewer: str = typer.Option(
+        "cli",
+        "--reviewer",
+        help="Reviewer identifier for task input metadata.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON results.",
+    ),
+) -> None:
+    """Reject a reviewing candidate card without writing an atomic note."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = reject_candidate_card(connection, candidate_card_id, reason=reason, reviewer=reviewer)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    payload = {
+        "candidate_card_id": result.candidate_card_id,
+        "task_id": result.task_id,
+        "source_doc_id": result.source_doc_id,
+        "source_revision_id": result.source_revision_id,
+        "status": result.status,
+        "accepted_note_path": result.accepted_note_path,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Candidate card {result.candidate_card_id}: rejected")
+    console.print(f"Task: {result.task_id}")
+
+
+@contextmanager
+def _existing_vault_connection(vault_path: Path) -> Iterator[sqlite3.Connection]:
+    db_path = vault_path / ".indbase" / "db.sqlite"
+    if not db_path.is_file():
+        console.print(f"[red]Vault database not found:[/red] {db_path}")
+        raise typer.Exit(2)
+    connection = connect(db_path)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _yes_no(value: object) -> str:
+    return "yes" if bool(value) else "no"
+
+
+def _search_options_for_vault(vault_path: Path, *, top_k: int | None, mode: str = "fts") -> SearchOptions:
+    config_path = vault_path / ".indbase" / "config" / "config.toml"
+    search_config = load_config(config_path).search if config_path.is_file() else SearchConfig()
+    options = SearchOptions.from_config(search_config)
+    return SearchOptions(
+        top_k=options.top_k if top_k is None else top_k,
+        log_queries=options.log_queries,
+        persist_search_results=options.persist_search_results,
+        cjk_strategy=options.cjk_strategy,
+        mode=mode,
+    )
+
+
+def _load_document_for_cli(connection: sqlite3.Connection, doc_id: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT doc_id, title, status, archived_at, current_revision_id, source_type,
+               source_uri, canonical_path, original_path, ingest_status, fts_status,
+               quality_status, needs_review, category_id
+        FROM documents
+        WHERE doc_id = ?
+          AND deleted_at IS NULL
+        """,
+        (doc_id,),
+    ).fetchone()
+
+
+def _resolve_doc_open_target(
+    connection: sqlite3.Connection,
+    vault: Path,
+    doc_id: str,
+    *,
+    original: bool,
+    folder: bool,
+    revision_id: str | None,
+) -> Path:
+    if original and revision_id is not None:
+        raise ValueError("--original and --revision cannot be used together.")
+    if revision_id is not None:
+        row = connection.execute(
+            """
+            SELECT markdown_path
+            FROM document_revisions
+            WHERE doc_id = ?
+              AND revision_id = ?
+              AND deleted_at IS NULL
+            """,
+            (doc_id, revision_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Revision not found for document {doc_id}: {revision_id}")
+        target = vault / row["markdown_path"]
+    else:
+        row = _load_document_for_cli(connection, doc_id)
+        if row is None:
+            raise ValueError(f"Document not found: {doc_id}")
+        path_value = row["original_path"] if original else row["canonical_path"]
+        path_label = "original_path" if original else "canonical_path"
+        if not path_value:
+            raise ValueError(f"Document {doc_id} has no {path_label}.")
+        target = vault / path_value
+    if folder:
+        target = target.parent
+    target = target.resolve(strict=False)
+    if not target.exists():
+        raise ValueError(f"Path does not exist: {target}")
+    return target
+
+
+def _print_key_values(values: dict[str, object]) -> None:
+    for key, value in values.items():
+        console.print(f"{key}: {'' if value is None else value}")
+
+
+def _json_list_for_cli(value: object) -> list[str]:
+    if value is None:
+        return []
+    parsed = json.loads(str(value))
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
+
+
+def _json_array_for_cli(value: object) -> list[object]:
+    if value is None:
+        return []
+    parsed = json.loads(str(value))
+    if not isinstance(parsed, list):
+        return []
+    return parsed
+
+
+app.add_typer(catalog_app, name="catalog")
+app.add_typer(task_app, name="task")
+app.add_typer(index_app, name="index")
+app.add_typer(doc_app, name="doc")
+app.add_typer(review_app, name="review")
+app.add_typer(error_app, name="error")
+app.add_typer(tag_app, name="tag")
+app.add_typer(ocr_app, name="ocr")
+app.add_typer(classification_app, name="classify")
+app.add_typer(translation_app, name="translate")
+app.add_typer(card_app, name="card")
