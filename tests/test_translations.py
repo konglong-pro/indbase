@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -549,7 +550,8 @@ def test_cli_translate_document_json(tmp_path) -> None:
     assert len(payload["source_chunk_ids"]) == current_chunks
     opened = runner.invoke(app, ["translate", "open", payload["translation_id"], "--vault", str(vault), "--print-path"])
     assert opened.exit_code == 0
-    assert payload["output_path"].replace("/", "\\") in opened.output
+    printed_path = Path(opened.output.replace("\n", "").strip())
+    assert (vault / payload["output_path"]).resolve() == printed_path.resolve()
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         translation = connection.execute("SELECT translation_mode FROM translations").fetchone()
     assert translation["translation_mode"] == "full_document"
