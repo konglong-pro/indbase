@@ -2,11 +2,20 @@
 
 This file defines how Codex agents should work in this repository.
 
+For **current delivery and test status**, use:
+
+- `docs/project-status.md`
+- `docs/testing.md`
+
 For detailed product and architecture planning, use:
 
 - `docs/planning/mvp-v0.1-spec.md`
+- `docs/planning/v0.2-swallow-ingest-integration.md` for the explicitly approved swallow-backed ingest expansion
+- `docs/agents/swallow-ingest-integration/AGENT.md` for implementation rules specific to the ingest integration
+- `docs/planning/v0.2-transition-output-integration.md` for the explicitly approved transition-backed output expansion
+- `docs/agents/transition-output-integration/AGENT.md` for implementation rules specific to the output integration
 
-Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat overall-plan drafts as orientation only unless they are explicitly reconciled with the v0.1 spec.
+Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
 
 Do not duplicate the full MVP specification in this file. Treat this file as the operational rulebook for agents, and treat the planning docs as the source of truth for product and architecture details.
 
@@ -30,9 +39,9 @@ Documentation rules:
 
 `indbase` is a local-first personal knowledge database. It ingests local materials into a vault, preserves originals, writes readable Markdown, records metadata and immutable revisions, chunks content, builds SQLite FTS indexes, and returns reliable search snippets tied to source chunks.
 
-The first implementation target is **v0.1 Foundation MVP**.
+The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest** and **v0.2 transition-backed output**.
 
-Do not implement v0.2 or v0.3 functionality unless explicitly instructed in a task.
+Do not implement other v0.2 or v0.3 functionality unless explicitly instructed in a task.
 
 Correct development attitude:
 
@@ -181,7 +190,8 @@ M3 implementation boundaries:
 Tier 1 md/txt/html/csv/json is blocking for M3.
 Tier 2 docx/xlsx/pptx is best-effort and must not block M3.
 HTML uses MarkItDown first and falls back to basic HTML text extraction.
-MarkItDown availability is optional; doctor should report it.
+Historical v0.1/M3: MarkItDown availability was optional and doctor reported it.
+These two MarkItDown rules are superseded for the active v0.2 swallow ingest expansion, where doctor reports swallow capability and production ingest must not fall back to MarkItDown.
 Ingest may run synchronously first, but must write tasks/task_events/errors/review state.
 Folder ingest with unsupported, duplicate, or failed items uses completed_with_issues.
 review list/show is required; review resolve may stay a thin status update.
@@ -231,6 +241,49 @@ translation records
 stronger review queue
 stronger harness
 ```
+
+### Active v0.2 Swallow Ingest Expansion
+
+The user explicitly approved the swallow-backed ingest expansion. For ingest conversion work:
+
+```text
+swallow owns conversion.
+indbase owns trust, vault state, revisions, chunks, indexes, tasks, errors, reviews, and doctor.
+candidate != revision.
+default search indexes only promoted current revisions.
+```
+
+Rules:
+
+- Use the local swallow SDK/Core adapter, not the swallow HTTP service.
+- `features.swallow_ingest=false` means conversion fails visibly with `legacy_conversion_retired`; do not fall back to indbase direct normalizers or MarkItDown.
+- Normal conversion rows use `converter_runs.converter_name = swallow`.
+- Required evidence artifacts must be copied into `.indbase/artifacts/...` before automatic promotion.
+- OCR/ASR/URL/browser/archive outputs can become searchable only after the indbase promotion policy accepts them.
+- `normalizers.py` may remain only as a temporary test fixture baseline until legacy fixtures are rewritten.
+
+### Active v0.2 Transition Output Expansion
+
+The user explicitly approved the transition-backed output expansion. For Markdown standardization and output export work:
+
+```text
+transition owns standardization and export rendering.
+indbase owns trust, identity, source bindings, revisions, output records, tasks, errors, artifacts, and doctor.
+export artifact is not a source revision.
+source replacement creates a new immutable revision.
+default search indexes source revisions only.
+```
+
+Rules:
+
+- Use the local Node SDK bridge with a pinned transition dependency, not a transition HTTP service.
+- `indb output export` creates derived artifacts only and must not mutate source documents.
+- `indb doc normalize <doc_id> --replace-current` may replace the current source document only by writing a new immutable revision.
+- Never overwrite canonical Markdown in place.
+- Old revisions and old chunks must remain intact.
+- Export artifacts must not enter default source search.
+- Required transition evidence must be copied into `.indbase/artifacts/output_runs/...`.
+- Transition cache is disposable and must not be treated as durable evidence.
 
 ### v0.3 Intelligent Workflow MVP
 
@@ -435,6 +488,21 @@ Do not confuse `source_uri`, `normalized_source_uri`, `original_path`, `canonica
 
 Metadata edits such as category, tag, title, and archive status must not mutate old revision Markdown or frontmatter. Search and doctor trust the database as the authoritative durable state.
 
+## v0.2 Release Gates
+
+Active release verification uses `docs/planning/v0.2-release-gate-checkpoint.md` and `scripts/v02_release_gate.py`.
+
+```text
+A pytest + B compileall          -> daily required
+C v02 deterministic + doctor neg -> release required (fake swallow/bridge OK)
+D real swallow/transition smoke  -> required when env available; skip otherwise
+E real-corpus dogfood            -> formal release; explicit waiver only
+```
+
+GitHub: `.github/workflows/ci.yml` (A–D on PR), `.github/workflows/release-dogfood.yml` (E manual/scheduled).
+
+`scripts/m3_dogfood_gate.py` is **historical v0.1 compatibility only** — not a v0.2 release blocker. Default vault `swallow_ingest=false` intentionally fails legacy conversion; partial candidates are not default-searchable.
+
 ## Required Testing Attitude
 
 When implementing v0.1, tests should cover:
@@ -525,8 +593,8 @@ Recommended implementation order:
 6. category templates
 7. task/error/review tables
 8. source inspector + archive
-9. direct normalizers for Tier 1
-10. MarkItDown adapter for Tier 2
+9. direct normalizers for Tier 1 (historical v0.1 only; not active v0.2 swallow ingest)
+10. MarkItDown adapter for Tier 2 (historical v0.1 only; not active v0.2 swallow ingest)
 11. metadata + revision writing
 12. chunker
 13. FTS indexer with CJK search_text
@@ -581,7 +649,11 @@ When asked to implement a task, first determine which MVP phase it belongs to.
 
 If the task belongs to v0.1, implement it according to this file and `docs/planning/mvp-v0.1-spec.md`.
 
-If the task belongs to v0.2 or v0.3 and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep v0.1 stable.
+If the task belongs to the approved v0.2 swallow ingest expansion, implement it according to `docs/planning/v0.2-swallow-ingest-integration.md` and `docs/agents/swallow-ingest-integration/AGENT.md`.
+
+If the task belongs to the approved v0.2 transition output expansion, implement it according to `docs/planning/v0.2-transition-output-integration.md` and `docs/agents/transition-output-integration/AGENT.md`.
+
+If the task belongs to any other v0.2 or v0.3 area and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep the current stable layer intact.
 
 The success metric for v0.1 is not intelligence. The success metric is:
 

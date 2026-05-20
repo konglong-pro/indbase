@@ -14,6 +14,8 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0003_v02_data_substrate",
         "0004_classification_feedback_audit",
         "0005_candidate_cards",
+        "0006_swallow_ingest_integration",
+        "0007_transition_output_integration",
     ]
 
     connection = connect(db_path)
@@ -45,6 +47,8 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0003_v02_data_substrate",
             "0004_classification_feedback_audit",
             "0005_candidate_cards",
+            "0006_swallow_ingest_integration",
+            "0007_transition_output_integration",
         ]
         review_columns = {
             row["name"]
@@ -77,6 +81,31 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             for row in connection.execute("PRAGMA table_info(candidate_card_sources)")
         }
         assert {"candidate_card_id", "source_doc_id", "source_revision_id", "source_chunk_id", "claim_id"} <= source_columns
+        converter_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(converter_runs)")
+        }
+        assert {
+            "external_job_id",
+            "external_trace_path",
+            "external_manifest_path",
+            "primary_worker",
+            "worker_chain_json",
+            "candidate_path",
+            "artifact_manifest_json",
+            "promotion_status",
+            "promotion_reason",
+        } <= converter_columns
+        chunk_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(chunks)")
+        }
+        assert "source_locator_json" in chunk_columns
+        document_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(documents)")
+        }
+        assert {"access_context", "privacy_flags_json", "source_snapshot_path"} <= document_columns
     finally:
         connection.close()
 

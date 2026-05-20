@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "render": {
+    "html": { "enabled": true },
+    "pdf": { "enabled": true },
+    "docx": { "enabled": true },
+    "fonts": { "cjk": "auto" }
+  },
+  "trace": {
+    "level": "info"
+  }
+}

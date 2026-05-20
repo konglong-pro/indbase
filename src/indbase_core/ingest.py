@@ -3,20 +3,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
+import mimetypes
 from pathlib import Path
+import re
+import shutil
 import sqlite3
+from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from indbase_core.archive import archive_pending_sources
 from indbase_core.chunker import chunk_current_revision
-from indbase_core.conversion import convert_archived_sources
-from indbase_core.config import IngestConfig
+from indbase_core.conversion import convert_archived_sources, hash_markdown
+from indbase_core.config import IndbaseConfig, IngestConfig, default_config, load_config
 from indbase_core.db import connect
 from indbase_core.errors import record_error
-from indbase_core.ids import new_prefixed_id
+from indbase_core.ids import new_doc_id, new_prefixed_id
 from indbase_core.indexer import FtsRebuildResult, rebuild_fts_index
+from indbase_core.paths import normalize_source_uri, slugify, vault_paths
+from indbase_core.promotion_policy import evaluate_swallow_promotion
 from indbase_core.revisions import write_revisions_for_converted_sources
 from indbase_core.reviews import create_review_item
-from indbase_core.source_inspector import SourceInspection, scan_sources
+from indbase_core.source_inspector import SourceInspection, hash_file, scan_sources
+from indbase_core.swallow_adapter import (
+    ArchiveExpansionCandidate,
+    ArchiveLogicalDocumentCandidate,
+    ConversionCandidate,
+    SwallowIngestAdapter,
+    artifact_manifest_json,
+    candidate_to_quality_signals,
+)
 from indbase_core.tasks import add_task_event, create_task, finish_task, start_task
 from indbase_core.time import utc_now_iso
 
@@ -167,6 +184,7 @@ def run_m2_ingest_pipeline(
     recursive: bool = False,
     ingest_config: IngestConfig | None = None,
 ) -> IngestPipelineResult:
+    resolved_ingest_config = _resolve_ingest_config(vault_path, ingest_config)
     connection = connect(Path(vault_path) / ".indbase" / "db.sqlite")
     try:
         task_id = create_task(
@@ -184,7 +202,7 @@ def run_m2_ingest_pipeline(
             connection,
             source_input,
             recursive=recursive,
-            ingest_config=ingest_config,
+            ingest_config=resolved_ingest_config,
             task_id=task_id,
         )
         add_task_event(
@@ -199,7 +217,12 @@ def run_m2_ingest_pipeline(
                 "duplicate_items": plan.duplicate_items,
             },
         )
-        archive_result = archive_pending_sources(connection, vault_path, plan.ingest_id)
+        archive_result = archive_pending_sources(
+            connection,
+            vault_path,
+            plan.ingest_id,
+            ingest_config=resolved_ingest_config,
+        )
         add_task_event(
             connection,
             task_id,
@@ -273,6 +296,7 @@ def run_m3_ingest_pipeline(
     recursive: bool = False,
     ingest_config: IngestConfig | None = None,
 ) -> IngestPipelineResult:
+    resolved_ingest_config = _resolve_ingest_config(vault_path, ingest_config)
     connection = connect(Path(vault_path) / ".indbase" / "db.sqlite")
     try:
         task_id = create_task(
@@ -290,7 +314,7 @@ def run_m3_ingest_pipeline(
             connection,
             source_input,
             recursive=recursive,
-            ingest_config=ingest_config,
+            ingest_config=resolved_ingest_config,
             task_id=task_id,
         )
         add_task_event(
@@ -305,7 +329,12 @@ def run_m3_ingest_pipeline(
                 "duplicate_items": plan.duplicate_items,
             },
         )
-        archive_result = archive_pending_sources(connection, vault_path, plan.ingest_id)
+        archive_result = archive_pending_sources(
+            connection,
+            vault_path,
+            plan.ingest_id,
+            ingest_config=resolved_ingest_config,
+        )
         add_task_event(
             connection,
             task_id,
@@ -430,6 +459,1342 @@ def run_m3_ingest_pipeline(
         raise
     finally:
         connection.close()
+
+
+def run_m3_url_ingest_pipeline(
+    vault_path: Path | str,
+    url: str,
+) -> IngestPipelineResult:
+    indbase_config = _load_indbase_config(vault_path)
+    _validate_url_ingest_enabled(indbase_config)
+    connection = connect(Path(vault_path) / ".indbase" / "db.sqlite")
+    try:
+        task_id = create_task(
+            connection,
+            "ingest",
+            input_data={
+                "source_input": url,
+                "source_type": "url",
+                "capture": "playwright",
+                "m3_searchable": True,
+            },
+        )
+        start_task(connection, task_id)
+        add_task_event(connection, task_id, "ingest_started", "M3 URL Playwright ingest started.")
+        plan = _create_url_ingest_source(connection, vault_path, url, task_id=task_id)
+        add_task_event(
+            connection,
+            task_id,
+            "sources_inspected",
+            "URL source normalized and staged for local Playwright snapshot.",
+            {
+                "total_items": plan.total_items,
+                "supported_items": plan.supported_items,
+                "unsupported_items": plan.unsupported_items,
+                "duplicate_items": plan.duplicate_items,
+            },
+        )
+        add_task_event(
+            connection,
+            task_id,
+            "originals_archived",
+            "URL reference archived; Playwright snapshot will be captured by swallow.",
+            {
+                "archived_items": 1,
+                "failed_items": 0,
+            },
+        )
+        conversion_result = convert_archived_sources(connection, vault_path, plan.ingest_id)
+        add_task_event(
+            connection,
+            task_id,
+            "sources_converted",
+            "URL captured with Playwright and converted to Markdown candidate.",
+            {
+                "converted_items": len(conversion_result.converted_items),
+                "skipped_items": conversion_result.skipped_items,
+                "failed_items": conversion_result.failed_items,
+            },
+        )
+        revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
+        add_task_event(
+            connection,
+            task_id,
+            "revisions_written",
+            "Immutable source Markdown revisions written.",
+            {
+                "written_revisions": len(revision_result.written_revisions),
+                "failed_items": revision_result.failed_items,
+            },
+        )
+        chunked_documents = _chunk_written_revisions(connection, vault_path, revision_result.written_revisions)
+        add_task_event(
+            connection,
+            task_id,
+            "chunks_written",
+            "Current revisions chunked.",
+            {
+                "chunked_documents": chunked_documents,
+            },
+        )
+        index_result = rebuild_fts_index(connection, vault_path)
+        current_index_failed_documents = _mark_current_ingest_index_failures(
+            connection,
+            plan.ingest_id,
+            index_result,
+        )
+        add_task_event(
+            connection,
+            task_id,
+            "fts_rebuilt",
+            "SQLite FTS index rebuilt.",
+            {
+                "indexed_documents": index_result.indexed_documents,
+                "indexed_chunks": index_result.indexed_chunks,
+                "failed_documents": index_result.failed_documents,
+                "current_ingest_failed_documents": current_index_failed_documents,
+            },
+        )
+        _finalize_m3_ingest_run(connection, plan.ingest_id)
+        result = _load_pipeline_result(
+            connection,
+            plan.ingest_id,
+            task_id,
+            chunked_documents=chunked_documents,
+            indexed_documents=index_result.indexed_documents,
+            indexed_chunks=index_result.indexed_chunks,
+            index_failed_documents=current_index_failed_documents,
+        )
+        finish_status = result.status
+        if finish_status == "succeeded" and current_index_failed_documents > 0:
+            finish_status = "completed_with_issues"
+        finish_task(
+            connection,
+            task_id,
+            finish_status,
+            result_data={
+                "ingest_id": result.ingest_id,
+                "total_items": result.total_items,
+                "succeeded_items": result.succeeded_items,
+                "failed_items": result.failed_items,
+                "unsupported_items": result.unsupported_items,
+                "duplicate_items": result.duplicate_items,
+                "review_items_count": result.review_items_count,
+                "written_revisions": result.written_revisions,
+                "chunked_documents": result.chunked_documents,
+                "indexed_documents": result.indexed_documents,
+                "indexed_chunks": result.indexed_chunks,
+                "index_failed_documents": result.index_failed_documents,
+                "searchable": result.searchable,
+            },
+        )
+        if finish_status != result.status:
+            return IngestPipelineResult(
+                ingest_id=result.ingest_id,
+                task_id=result.task_id,
+                status=finish_status,
+                total_items=result.total_items,
+                succeeded_items=result.succeeded_items,
+                failed_items=result.failed_items,
+                unsupported_items=result.unsupported_items,
+                duplicate_items=result.duplicate_items,
+                review_items_count=result.review_items_count,
+                written_revisions=result.written_revisions,
+                searchable=result.searchable,
+                chunked_documents=result.chunked_documents,
+                indexed_documents=result.indexed_documents,
+                indexed_chunks=result.indexed_chunks,
+                index_failed_documents=result.index_failed_documents,
+            )
+        return result
+    except Exception as exc:
+        if "task_id" in locals():
+            finish_task(
+                connection,
+                task_id,
+                "failed",
+                error_data={"type": type(exc).__name__, "message": str(exc)},
+            )
+        raise
+    finally:
+        connection.close()
+
+
+def run_m3_archive_ingest_pipeline(
+    vault_path: Path | str,
+    archive_path: Path | str,
+) -> IngestPipelineResult:
+    indbase_config = _load_indbase_config(vault_path)
+    _validate_archive_ingest_enabled(indbase_config)
+    source_path = Path(archive_path).resolve(strict=False)
+    if not source_path.is_file():
+        raise ValueError(f"Archive file not found: {source_path}")
+
+    connection = connect(Path(vault_path) / ".indbase" / "db.sqlite")
+    try:
+        task_id = create_task(
+            connection,
+            "ingest",
+            input_data={
+                "source_input": str(archive_path),
+                "source_type": "archive",
+                "expansion": "one_to_many",
+                "m3_searchable": True,
+            },
+        )
+        start_task(connection, task_id)
+        add_task_event(connection, task_id, "ingest_started", "M3 archive one-to-many ingest started.")
+
+        paths = vault_paths(vault_path)
+        adapter = SwallowIngestAdapter(vault_path=paths.root, config=indbase_config.ingest.swallow)
+        expansion = adapter.expand_archive(source_path)
+        if not expansion.logical_documents:
+            raise ValueError("Archive conversion produced no logical documents.")
+        add_task_event(
+            connection,
+            task_id,
+            "archive_expanded",
+            "Archive expanded into logical documents by swallow.",
+            {
+                "archive_type": expansion.archive_type,
+                "logical_documents": len(expansion.logical_documents),
+            },
+        )
+
+        plan = _create_archive_ingest_sources(
+            connection,
+            vault_path,
+            source_path,
+            expansion,
+            indbase_config=indbase_config,
+            task_id=task_id,
+        )
+        add_task_event(
+            connection,
+            task_id,
+            "sources_converted",
+            "Archive logical documents staged as Markdown candidates.",
+            {
+                "converted_items": plan.supported_items,
+                "review_items": plan.review_items_count,
+                "failed_items": 0,
+            },
+        )
+        revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
+        add_task_event(
+            connection,
+            task_id,
+            "revisions_written",
+            "Immutable source Markdown revisions written.",
+            {
+                "written_revisions": len(revision_result.written_revisions),
+                "failed_items": revision_result.failed_items,
+            },
+        )
+        chunked_documents = _chunk_written_revisions(connection, vault_path, revision_result.written_revisions)
+        add_task_event(
+            connection,
+            task_id,
+            "chunks_written",
+            "Current revisions chunked.",
+            {
+                "chunked_documents": chunked_documents,
+            },
+        )
+        index_result = rebuild_fts_index(connection, vault_path)
+        current_index_failed_documents = _mark_current_ingest_index_failures(
+            connection,
+            plan.ingest_id,
+            index_result,
+        )
+        add_task_event(
+            connection,
+            task_id,
+            "fts_rebuilt",
+            "SQLite FTS index rebuilt.",
+            {
+                "indexed_documents": index_result.indexed_documents,
+                "indexed_chunks": index_result.indexed_chunks,
+                "failed_documents": index_result.failed_documents,
+                "current_ingest_failed_documents": current_index_failed_documents,
+            },
+        )
+        _finalize_m3_ingest_run(connection, plan.ingest_id)
+        result = _load_pipeline_result(
+            connection,
+            plan.ingest_id,
+            task_id,
+            chunked_documents=chunked_documents,
+            indexed_documents=index_result.indexed_documents,
+            indexed_chunks=index_result.indexed_chunks,
+            index_failed_documents=current_index_failed_documents,
+        )
+        finish_status = result.status
+        if finish_status == "succeeded" and current_index_failed_documents > 0:
+            finish_status = "completed_with_issues"
+        finish_task(
+            connection,
+            task_id,
+            finish_status,
+            result_data={
+                "ingest_id": result.ingest_id,
+                "total_items": result.total_items,
+                "succeeded_items": result.succeeded_items,
+                "failed_items": result.failed_items,
+                "unsupported_items": result.unsupported_items,
+                "duplicate_items": result.duplicate_items,
+                "review_items_count": result.review_items_count,
+                "written_revisions": result.written_revisions,
+                "chunked_documents": result.chunked_documents,
+                "indexed_documents": result.indexed_documents,
+                "indexed_chunks": result.indexed_chunks,
+                "index_failed_documents": result.index_failed_documents,
+                "searchable": result.searchable,
+            },
+        )
+        if finish_status != result.status:
+            return IngestPipelineResult(
+                ingest_id=result.ingest_id,
+                task_id=result.task_id,
+                status=finish_status,
+                total_items=result.total_items,
+                succeeded_items=result.succeeded_items,
+                failed_items=result.failed_items,
+                unsupported_items=result.unsupported_items,
+                duplicate_items=result.duplicate_items,
+                review_items_count=result.review_items_count,
+                written_revisions=result.written_revisions,
+                searchable=result.searchable,
+                chunked_documents=result.chunked_documents,
+                indexed_documents=result.indexed_documents,
+                indexed_chunks=result.indexed_chunks,
+                index_failed_documents=result.index_failed_documents,
+            )
+        return result
+    except Exception as exc:
+        if "task_id" in locals():
+            error_id = record_error(
+                connection,
+                component="archive_ingest",
+                error_type=type(exc).__name__,
+                message=str(exc),
+                task_id=task_id,
+                user_message="Failed to expand archive into indbase logical documents.",
+                retryable=False,
+                payload={"source_input": str(archive_path)},
+            )
+            finish_task(
+                connection,
+                task_id,
+                "failed",
+                error_data={"type": type(exc).__name__, "message": str(exc), "error_id": error_id},
+            )
+            connection.commit()
+        raise
+    finally:
+        connection.close()
+
+
+def _resolve_ingest_config(vault_path: Path | str, ingest_config: IngestConfig | None) -> IngestConfig:
+    if ingest_config is not None:
+        return ingest_config
+    config_path = Path(vault_path) / ".indbase" / "config" / "config.toml"
+    if config_path.is_file():
+        return load_config(config_path).ingest
+    return default_config(vault_path).ingest
+
+
+def _load_indbase_config(vault_path: Path | str) -> IndbaseConfig:
+    config_path = Path(vault_path) / ".indbase" / "config" / "config.toml"
+    if config_path.is_file():
+        return load_config(config_path)
+    return default_config(vault_path)
+
+
+def _validate_url_ingest_enabled(config: IndbaseConfig) -> None:
+    if not config.features.swallow_ingest:
+        raise ValueError("URL ingest requires features.swallow_ingest = true.")
+    if not config.features.web_ingest:
+        raise ValueError("URL ingest requires features.web_ingest = true.")
+
+
+def _validate_archive_ingest_enabled(config: IndbaseConfig) -> None:
+    if not config.features.swallow_ingest:
+        raise ValueError("Archive ingest requires features.swallow_ingest = true.")
+
+
+def _create_url_ingest_source(
+    connection: sqlite3.Connection,
+    vault_path: Path | str,
+    url: str,
+    *,
+    task_id: str,
+) -> IngestPlanResult:
+    paths = vault_paths(vault_path)
+    normalized_url = _normalize_url_source_uri(url)
+    ingest_id = new_prefixed_id("ingest")
+    ingest_item_id = new_prefixed_id("ingest_item")
+    source_file_id = new_prefixed_id("source_file")
+    now = utc_now_iso()
+    existing_doc_id = _existing_doc_id_for_normalized_uri(connection, normalized_url)
+    doc_id = existing_doc_id or new_doc_id()
+    payload = _url_reference_payload(url, normalized_url)
+    source_hash = _hash_bytes(payload)
+    original_abs = _available_url_reference_path(paths, doc_id, source_file_id)
+    original_abs.parent.mkdir(parents=True, exist_ok=True)
+    original_abs.write_bytes(payload)
+    original_rel = paths.relative_to_vault(original_abs)
+    title = _title_from_url(normalized_url)
+    filename_slug = slugify(title)
+
+    connection.execute(
+        """
+        INSERT INTO ingest_runs(
+          ingest_id, source_kind, source_input, status, total_items, succeeded_items,
+          failed_items, unsupported_items, duplicate_items, review_items_count,
+          task_id, created_at, updated_at
+        )
+        VALUES (?, 'url', ?, 'pending', 1, 0, 0, 0, 0, 0, ?, ?, ?)
+        """,
+        (ingest_id, url, task_id, now, now),
+    )
+    if existing_doc_id is None:
+        connection.execute(
+            """
+            INSERT INTO documents(
+              doc_id, current_revision_id, title, original_title, filename_slug,
+              status, source_type, source_uri, normalized_source_uri, source_hash,
+              canonical_path, original_path, language, category_id, quality_status,
+              quality_signals_json, needs_review, ingest_status, fts_status,
+              embedding_status, classification_status, access_context,
+              privacy_flags_json, source_snapshot_path, created_at, updated_at
+            )
+            VALUES (
+              ?, NULL, ?, ?, ?, 'active', 'url', ?, ?, ?, NULL, ?, NULL,
+              'cat_uncategorized', NULL, NULL, 0, 'archived', 'not_indexed',
+              'not_applicable', 'manual', 'public_url', '{}', NULL, ?, ?
+            )
+            """,
+            (
+                doc_id,
+                title,
+                title,
+                filename_slug,
+                url,
+                normalized_url,
+                source_hash,
+                original_rel,
+                now,
+                now,
+            ),
+        )
+    else:
+        connection.execute(
+            """
+            UPDATE documents
+            SET source_type = 'url',
+                source_uri = ?,
+                normalized_source_uri = ?,
+                source_hash = ?,
+                original_path = ?,
+                access_context = 'public_url',
+                privacy_flags_json = '{}',
+                source_snapshot_path = NULL,
+                ingest_status = 'archived',
+                updated_at = ?
+            WHERE doc_id = ?
+            """,
+            (url, normalized_url, source_hash, original_rel, now, doc_id),
+        )
+
+    connection.execute(
+        """
+        INSERT INTO source_files(
+          source_file_id, doc_id, source_uri, normalized_source_uri, original_filename,
+          original_ext, mime_type, size_bytes, source_hash, original_path,
+          access_context, privacy_flags_json, source_snapshot_path,
+          created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'url', 'application/json', ?, ?, ?,
+                'public_url', '{}', NULL, ?, ?)
+        """,
+        (
+            source_file_id,
+            doc_id,
+            url,
+            normalized_url,
+            _url_reference_filename(normalized_url),
+            len(payload),
+            source_hash,
+            original_rel,
+            now,
+            now,
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO ingest_items(
+          ingest_item_id, ingest_id, doc_id, source_uri, normalized_source_uri,
+          status, created_at, updated_at, finished_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'running', ?, ?, NULL)
+        """,
+        (ingest_item_id, ingest_id, doc_id, url, normalized_url, now, now),
+    )
+    connection.commit()
+    return IngestPlanResult(
+        ingest_id=ingest_id,
+        status="pending",
+        total_items=1,
+        supported_items=1,
+        unsupported_items=0,
+        duplicate_items=0,
+        review_items_count=0,
+        inspections=(),
+    )
+
+
+def _create_archive_ingest_sources(
+    connection: sqlite3.Connection,
+    vault_path: Path | str,
+    archive_path: Path,
+    expansion: ArchiveExpansionCandidate,
+    *,
+    indbase_config: IndbaseConfig,
+    task_id: str,
+) -> IngestPlanResult:
+    paths = vault_paths(vault_path)
+    ingest_id = new_prefixed_id("ingest")
+    parent_ingest_item_id = new_prefixed_id("ingest_item")
+    now = utc_now_iso()
+    normalized_archive_uri = normalize_source_uri(archive_path)
+    archive_hash = hash_file(archive_path)
+    archive_ext = archive_path.suffix.lower().lstrip(".") or "zip"
+    mime_type = mimetypes.guess_type(archive_path.name)[0] or "application/zip"
+    logical_records = [
+        _prepare_archive_logical_record(connection, normalized_archive_uri, logical)
+        for logical in expansion.logical_documents
+    ]
+    if not logical_records:
+        raise ValueError("Archive conversion produced no logical documents.")
+
+    storage_doc_id = logical_records[0]["doc_id"]
+    original_abs = _available_archive_original_path(paths, storage_doc_id, archive_ext, ingest_id)
+    original_abs.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(archive_path, original_abs)
+    original_rel = paths.relative_to_vault(original_abs)
+    archive_size = archive_path.stat().st_size
+
+    connection.execute(
+        """
+        INSERT INTO ingest_runs(
+          ingest_id, source_kind, source_input, status, total_items, succeeded_items,
+          failed_items, unsupported_items, duplicate_items, review_items_count,
+          task_id, created_at, updated_at
+        )
+        VALUES (?, 'archive', ?, 'pending', ?, 0, 0, 0, 0, 0, ?, ?, ?)
+        """,
+        (
+            ingest_id,
+            str(archive_path),
+            len(logical_records) + 1,
+            task_id,
+            now,
+            now,
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO ingest_items(
+          ingest_item_id, ingest_id, doc_id, source_uri, normalized_source_uri,
+          status, created_at, updated_at, finished_at, parent_ingest_item_id,
+          logical_source_id
+        )
+        VALUES (?, ?, NULL, ?, ?, 'succeeded', ?, ?, ?, NULL, ?)
+        """,
+        (
+            parent_ingest_item_id,
+            ingest_id,
+            str(archive_path),
+            normalized_archive_uri,
+            now,
+            now,
+            now,
+            f"archive:{archive_hash}",
+        ),
+    )
+
+    review_count = 0
+    supported_count = 0
+    for record in logical_records:
+        logical = record["logical"]
+        decision = _insert_archive_logical_source(
+            connection,
+            paths,
+            ingest_id,
+            parent_ingest_item_id,
+            archive_path,
+            normalized_archive_uri,
+            archive_hash,
+            archive_ext,
+            mime_type,
+            archive_size,
+            original_rel,
+            expansion,
+            record,
+            indbase_config=indbase_config,
+            now=now,
+        )
+        if decision != "failed":
+            supported_count += 1
+        if decision == "review-before-current":
+            review_count += 1
+
+    connection.execute(
+        """
+        UPDATE ingest_runs
+        SET status = 'running',
+            review_items_count = ?,
+            updated_at = ?
+        WHERE ingest_id = ?
+        """,
+        (review_count, utc_now_iso(), ingest_id),
+    )
+    connection.commit()
+    return IngestPlanResult(
+        ingest_id=ingest_id,
+        status="pending",
+        total_items=len(logical_records) + 1,
+        supported_items=supported_count,
+        unsupported_items=0,
+        duplicate_items=0,
+        review_items_count=review_count,
+        inspections=(),
+    )
+
+
+def _prepare_archive_logical_record(
+    connection: sqlite3.Connection,
+    normalized_archive_uri: str,
+    logical: ArchiveLogicalDocumentCandidate,
+) -> dict[str, Any]:
+    normalized_uri = _archive_logical_normalized_uri(normalized_archive_uri, logical.logical_source_id)
+    existing_doc_id = _existing_doc_id_for_normalized_uri(connection, normalized_uri)
+    return {
+        "logical": logical,
+        "doc_id": existing_doc_id or new_doc_id(),
+        "existing_doc_id": existing_doc_id,
+        "source_uri": normalized_uri,
+        "normalized_source_uri": normalized_uri,
+    }
+
+
+def _insert_archive_logical_source(
+    connection: sqlite3.Connection,
+    paths,
+    ingest_id: str,
+    parent_ingest_item_id: str,
+    archive_path: Path,
+    normalized_archive_uri: str,
+    archive_hash: str,
+    archive_ext: str,
+    mime_type: str,
+    archive_size: int,
+    original_rel: str,
+    expansion: ArchiveExpansionCandidate,
+    record: dict[str, Any],
+    *,
+    indbase_config: IndbaseConfig,
+    now: str,
+) -> str:
+    logical = record["logical"]
+    doc_id = str(record["doc_id"])
+    source_uri = str(record["source_uri"])
+    normalized_source_uri = str(record["normalized_source_uri"])
+    ingest_item_id = new_prefixed_id("ingest_item")
+    source_file_id = new_prefixed_id("source_file")
+    source_hash = _archive_logical_source_hash(archive_hash, logical)
+    title = logical.title
+    filename_slug = slugify(title)
+    output_hash = hash_markdown(logical.markdown_body) if logical.markdown_body.strip() else None
+    no_content_change = bool(output_hash and _current_revision_content_hash(connection, doc_id) == output_hash)
+    converter_run_id = new_prefixed_id("converter_run")
+    archived_artifact_map: dict[str, str] = {}
+    candidate_rel: str | None = None
+
+    if output_hash:
+        archived_artifact_map = _archive_swallow_candidate_artifacts(
+            paths,
+            doc_id,
+            converter_run_id,
+            expansion.aggregate_candidate,
+        )
+        if not no_content_change:
+            candidate_path = paths.converter_candidate_path(converter_run_id)
+            candidate_path.parent.mkdir(parents=True, exist_ok=True)
+            candidate_path.write_text(logical.markdown_body, encoding="utf-8")
+            candidate_rel = paths.relative_to_vault(candidate_path)
+    decision = _archive_logical_promotion_decision(
+        indbase_config,
+        expansion.aggregate_candidate,
+        logical,
+        archived_artifact_map=archived_artifact_map,
+    )
+    promotion_reason = _archive_logical_promotion_reason(
+        indbase_config,
+        expansion.aggregate_candidate,
+        logical,
+        archived_artifact_map=archived_artifact_map,
+    )
+
+    source_snapshot_path = _archive_logical_source_snapshot_path(logical, archived_artifact_map)
+    quality_signals = _archive_logical_quality_signals(
+        expansion,
+        logical,
+        archived_artifact_map=archived_artifact_map,
+        original_path=original_rel,
+    )
+    privacy_flags = {"archive_type": expansion.archive_type, "one_to_many": True}
+
+    if record["existing_doc_id"] is None:
+        connection.execute(
+            """
+            INSERT INTO documents(
+              doc_id, current_revision_id, title, original_title, filename_slug,
+              status, source_type, source_uri, normalized_source_uri, source_hash,
+              canonical_path, original_path, language, category_id, quality_status,
+              quality_signals_json, needs_review, ingest_status, fts_status,
+              embedding_status, classification_status, access_context,
+              privacy_flags_json, source_snapshot_path, created_at, updated_at
+            )
+            VALUES (
+              ?, NULL, ?, ?, ?, 'active', 'chatgpt_conversation', ?, ?, ?,
+              NULL, ?, NULL, 'cat_uncategorized', ?, ?, ?, ?, 'not_indexed',
+              'not_applicable', 'manual', 'local_archive', ?, ?, ?, ?
+            )
+            """,
+            (
+                doc_id,
+                title,
+                title,
+                filename_slug,
+                source_uri,
+                normalized_source_uri,
+                source_hash,
+                original_rel,
+                _quality_status_for_archive_decision(decision),
+                _json(quality_signals),
+                1 if decision == "review-before-current" else 0,
+                _document_ingest_status_for_archive_decision(decision, no_content_change),
+                _json(privacy_flags),
+                source_snapshot_path,
+                now,
+                now,
+            ),
+        )
+    else:
+        connection.execute(
+            """
+            UPDATE documents
+            SET title = ?,
+                original_title = ?,
+                filename_slug = ?,
+                source_type = 'chatgpt_conversation',
+                source_uri = ?,
+                normalized_source_uri = ?,
+                source_hash = ?,
+                original_path = ?,
+                quality_status = ?,
+                quality_signals_json = ?,
+                needs_review = ?,
+                ingest_status = ?,
+                fts_status = CASE WHEN ? THEN fts_status ELSE 'not_indexed' END,
+                access_context = 'local_archive',
+                privacy_flags_json = ?,
+                source_snapshot_path = COALESCE(?, source_snapshot_path),
+                updated_at = ?
+            WHERE doc_id = ?
+            """,
+            (
+                title,
+                title,
+                filename_slug,
+                source_uri,
+                normalized_source_uri,
+                source_hash,
+                original_rel,
+                _quality_status_for_archive_decision(decision),
+                _json(quality_signals),
+                1 if decision == "review-before-current" else 0,
+                _document_ingest_status_for_archive_decision(decision, no_content_change),
+                1 if no_content_change else 0,
+                _json(privacy_flags),
+                source_snapshot_path,
+                now,
+                doc_id,
+            ),
+        )
+
+    connection.execute(
+        """
+        INSERT INTO source_files(
+          source_file_id, doc_id, source_uri, normalized_source_uri, original_filename,
+          original_ext, mime_type, size_bytes, source_hash, original_path,
+          access_context, privacy_flags_json, source_snapshot_path,
+          created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local_archive', ?, ?, ?, ?)
+        """,
+        (
+            source_file_id,
+            doc_id,
+            source_uri,
+            normalized_source_uri,
+            archive_path.name,
+            archive_ext,
+            mime_type,
+            archive_size,
+            source_hash,
+            original_rel,
+            _json(privacy_flags),
+            source_snapshot_path,
+            now,
+            now,
+        ),
+    )
+    item_status = _archive_item_status_for_decision(decision, no_content_change)
+    connection.execute(
+        """
+        INSERT INTO ingest_items(
+          ingest_item_id, ingest_id, doc_id, source_uri, normalized_source_uri,
+          status, created_at, updated_at, finished_at, parent_ingest_item_id,
+          logical_source_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ingest_item_id,
+            ingest_id,
+            doc_id,
+            source_uri,
+            normalized_source_uri,
+            item_status,
+            now,
+            now,
+            now if item_status in {"succeeded", "pending_review", "failed"} else None,
+            parent_ingest_item_id,
+            logical.logical_source_id,
+        ),
+    )
+
+    if no_content_change:
+        _insert_archive_no_content_change_converter_run(
+            connection,
+            converter_run_id,
+            doc_id,
+            archive_hash,
+            output_hash or "",
+            quality_signals,
+            expansion.aggregate_candidate,
+            promotion_reason,
+            now,
+        )
+        return decision
+    if decision == "failed" or output_hash is None:
+        _insert_archive_failed_converter_run(
+            connection,
+            converter_run_id,
+            ingest_item_id,
+            doc_id,
+            archive_hash,
+            quality_signals,
+            expansion.aggregate_candidate,
+            promotion_reason,
+            now,
+        )
+        return decision
+
+    _insert_archive_converter_run(
+        connection,
+        converter_run_id,
+        doc_id,
+        archive_hash,
+        output_hash,
+        quality_signals,
+        expansion.aggregate_candidate,
+        candidate_rel,
+        archived_artifact_map,
+        decision=decision,
+        promotion_reason=promotion_reason,
+        now=now,
+    )
+    if decision == "review-before-current":
+        create_review_item(
+            connection,
+            review_type="conversion_pending_review",
+            target_type="converter_run",
+            target_id=converter_run_id,
+            reason=promotion_reason,
+            priority=40,
+        )
+    return decision
+
+
+def _normalize_url_source_uri(url: str) -> str:
+    parsed = urlparse(url.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"URL must be an absolute http(s) URL: {url}")
+    path = parsed.path or "/"
+    return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, "", parsed.query, ""))
+
+
+def _url_reference_payload(url: str, normalized_url: str) -> bytes:
+    return (
+        json.dumps(
+            {
+                "source_type": "url",
+                "source_uri": url,
+                "normalized_source_uri": normalized_url,
+                "capture": "playwright",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _hash_bytes(payload: bytes) -> str:
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def _existing_doc_id_for_normalized_uri(connection: sqlite3.Connection, normalized_url: str) -> str | None:
+    row = connection.execute(
+        """
+        SELECT doc_id
+        FROM documents
+        WHERE normalized_source_uri = ?
+          AND deleted_at IS NULL
+        ORDER BY created_at
+        LIMIT 1
+        """,
+        (normalized_url,),
+    ).fetchone()
+    return str(row["doc_id"]) if row is not None else None
+
+
+def _available_url_reference_path(paths, doc_id: str, source_file_id: str) -> Path:
+    primary = paths.original_path(doc_id, "url.json")
+    if not primary.exists():
+        return primary
+    return paths.original_dir(doc_id) / f"original__{source_file_id}.url.json"
+
+
+def _title_from_url(normalized_url: str) -> str:
+    parsed = urlparse(normalized_url)
+    value = f"{parsed.netloc}{parsed.path}".strip("/") or parsed.netloc or "url"
+    value = re.sub(r"\s+", " ", value.replace("-", " ").replace("_", " ")).strip()
+    return value[:120] or "url"
+
+
+def _url_reference_filename(normalized_url: str) -> str:
+    parsed = urlparse(normalized_url)
+    value = f"{parsed.netloc}{parsed.path}".strip("/") or "url"
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-._") or "url"
+    return f"{value[:80]}.url.json"
+
+
+def _archive_logical_normalized_uri(normalized_archive_uri: str, logical_source_id: str) -> str:
+    return f"{normalized_archive_uri}#chatgpt_conversation/{logical_source_id}"
+
+
+def _available_archive_original_path(paths, doc_id: str, extension: str, ingest_id: str) -> Path:
+    primary = paths.original_path(doc_id, extension)
+    if not primary.exists():
+        return primary
+    clean_extension = extension.lower().lstrip(".") or "zip"
+    return paths.original_dir(doc_id) / f"original__{ingest_id}.{clean_extension}"
+
+
+def _archive_logical_source_hash(archive_hash: str, logical: ArchiveLogicalDocumentCandidate) -> str:
+    payload = "\n".join(
+        [
+            archive_hash,
+            logical.logical_source_id,
+            logical.markdown_body,
+        ]
+    ).encode("utf-8")
+    return _hash_bytes(payload)
+
+
+def _archive_swallow_candidate_artifacts(
+    paths,
+    doc_id: str,
+    converter_run_id: str,
+    candidate: ConversionCandidate,
+) -> dict[str, str]:
+    archived: dict[str, str] = {}
+    artifact_dir = paths.artifact_dir(doc_id, converter_run_id)
+    for artifact in candidate.artifact_manifest.required:
+        source = Path(artifact)
+        if not source.is_absolute():
+            source = paths.swallow_cache / artifact
+        if not source.is_file():
+            continue
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        target = _available_artifact_path(artifact_dir, source.name)
+        shutil.copy2(source, target)
+        archived[artifact] = paths.relative_to_vault(target)
+    return archived
+
+
+def _archive_logical_source_snapshot_path(
+    logical: ArchiveLogicalDocumentCandidate,
+    archived_artifact_map: dict[str, str],
+) -> str | None:
+    for locator in logical.source_locators:
+        artifact = locator.get("artifact")
+        if isinstance(artifact, str) and artifact in archived_artifact_map:
+            return archived_artifact_map[artifact]
+    for archived in archived_artifact_map.values():
+        if Path(archived).name == "conversations.json":
+            return archived
+    return None
+
+
+def _archive_logical_quality_signals(
+    expansion: ArchiveExpansionCandidate,
+    logical: ArchiveLogicalDocumentCandidate,
+    *,
+    archived_artifact_map: dict[str, str],
+    original_path: str,
+) -> dict[str, object]:
+    aggregate = expansion.aggregate_candidate
+    quality_signals = candidate_to_quality_signals(aggregate)
+    warnings = [*aggregate.warnings, *logical.warnings]
+    locators: list[dict[str, object]] = []
+    for locator in logical.source_locators:
+        durable = dict(locator)
+        artifact = durable.get("artifact")
+        if isinstance(artifact, str) and artifact in archived_artifact_map:
+            durable["artifact"] = archived_artifact_map[artifact]
+        durable["source_path"] = original_path
+        locators.append(durable)
+    artifact_manifest = aggregate.artifact_manifest.to_dict()
+    artifact_manifest["archived_required"] = list(archived_artifact_map.values())
+    return {
+        **quality_signals,
+        "warnings": warnings,
+        "artifact_manifest": artifact_manifest,
+        "source_locators": locators,
+        "archive_type": expansion.archive_type,
+        "logical_source_id": logical.logical_source_id,
+        "archive_metadata": logical.metadata,
+        "text_length": len(logical.markdown_body),
+        "empty": len(logical.markdown_body.strip()) == 0,
+    }
+
+
+def _archive_logical_promotion_decision(
+    indbase_config: IndbaseConfig,
+    aggregate: ConversionCandidate,
+    logical: ArchiveLogicalDocumentCandidate,
+    *,
+    archived_artifact_map: dict[str, str],
+) -> str:
+    if not logical.markdown_body.strip():
+        return "failed"
+    if "archive_conversation_no_messages" in logical.warnings:
+        return "review-before-current"
+    return _evaluate_archive_logical_promotion(
+        indbase_config,
+        aggregate,
+        logical,
+        archived_artifact_map=archived_artifact_map,
+    ).status
+
+
+def _archive_logical_promotion_reason(
+    indbase_config: IndbaseConfig,
+    aggregate: ConversionCandidate,
+    logical: ArchiveLogicalDocumentCandidate,
+    *,
+    archived_artifact_map: dict[str, str],
+) -> str:
+    decision = _archive_logical_promotion_decision(
+        indbase_config,
+        aggregate,
+        logical,
+        archived_artifact_map=archived_artifact_map,
+    )
+    if decision == "trusted-current":
+        return "Swallow archive conversation passed indbase promotion gate."
+    if not logical.markdown_body.strip():
+        return "Archive conversation has empty Markdown."
+    if "archive_conversation_no_messages" in logical.warnings:
+        return "Archive conversation has no messages and requires review."
+    return _evaluate_archive_logical_promotion(
+        indbase_config,
+        aggregate,
+        logical,
+        archived_artifact_map=archived_artifact_map,
+    ).reason
+
+
+def _evaluate_archive_logical_promotion(
+    indbase_config: IndbaseConfig,
+    aggregate: ConversionCandidate,
+    logical: ArchiveLogicalDocumentCandidate,
+    *,
+    archived_artifact_map: dict[str, str],
+):
+    return evaluate_swallow_promotion(
+        indbase_config,
+        status=aggregate.status,
+        quality_score=aggregate.quality_score,
+        markdown_body=logical.markdown_body,
+        warnings=(*aggregate.warnings, *logical.warnings),
+        errors=aggregate.errors,
+        provenance=aggregate.provenance,
+        source_locators=logical.source_locators,
+        artifact_manifest_required=aggregate.artifact_manifest.required,
+        archived_artifacts=tuple(archived_artifact_map.values()),
+        access_context=aggregate.access_context,
+        privacy_flags=aggregate.privacy_flags,
+        trusted_reason="Swallow archive conversation passed indbase promotion gate.",
+        generic_review_reason="Swallow archive conversation requires review.",
+    )
+
+
+def _quality_status_for_archive_decision(decision: str) -> str:
+    if decision == "failed":
+        return "failed"
+    if decision == "review-before-current":
+        return "warning"
+    return "passed"
+
+
+def _document_ingest_status_for_archive_decision(decision: str, no_content_change: bool) -> str:
+    if no_content_change:
+        return "revisioned"
+    if decision == "trusted-current":
+        return "converted"
+    if decision == "review-before-current":
+        return "pending_review"
+    return "failed"
+
+
+def _archive_item_status_for_decision(decision: str, no_content_change: bool) -> str:
+    if no_content_change:
+        return "succeeded"
+    if decision == "trusted-current":
+        return "running"
+    if decision == "review-before-current":
+        return "pending_review"
+    return "failed"
+
+
+def _insert_archive_converter_run(
+    connection: sqlite3.Connection,
+    converter_run_id: str,
+    doc_id: str,
+    archive_hash: str,
+    output_hash: str,
+    quality_signals: dict[str, object],
+    aggregate: ConversionCandidate,
+    candidate_rel: str | None,
+    archived_artifact_map: dict[str, str],
+    *,
+    decision: str,
+    promotion_reason: str,
+    now: str,
+) -> None:
+    provenance = aggregate.provenance
+    connection.execute(
+        """
+        INSERT INTO converter_runs(
+          converter_run_id, doc_id, revision_id, converter_name, converter_version,
+          input_hash, output_hash, warnings_json, quality_signals_json, status,
+          started_at, finished_at, created_at, updated_at,
+          external_job_id, external_trace_path, external_manifest_path,
+          primary_worker, worker_chain_json, candidate_path,
+          artifact_manifest_json, promotion_status, promotion_reason
+        )
+        VALUES (?, ?, NULL, 'swallow', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            converter_run_id,
+            doc_id,
+            provenance.swallow_version if provenance else "unknown",
+            archive_hash,
+            output_hash,
+            _json(quality_signals.get("warnings", [])),
+            _json(quality_signals),
+            "succeeded" if decision == "trusted-current" else "pending_review",
+            now,
+            now,
+            now,
+            now,
+            provenance.swallow_job_id if provenance else None,
+            provenance.trace_path if provenance else None,
+            provenance.manifest_path if provenance else None,
+            provenance.primary_worker if provenance else "export_archive_worker",
+            _json(list(provenance.worker_chain) if provenance else ["export_archive_worker"]),
+            candidate_rel,
+            artifact_manifest_json(aggregate, tuple(archived_artifact_map.values())),
+            decision,
+            promotion_reason,
+        ),
+    )
+
+
+def _insert_archive_no_content_change_converter_run(
+    connection: sqlite3.Connection,
+    converter_run_id: str,
+    doc_id: str,
+    archive_hash: str,
+    output_hash: str,
+    quality_signals: dict[str, object],
+    aggregate: ConversionCandidate,
+    promotion_reason: str,
+    now: str,
+) -> None:
+    provenance = aggregate.provenance
+    connection.execute(
+        """
+        INSERT INTO converter_runs(
+          converter_run_id, doc_id, revision_id, converter_name, converter_version,
+          input_hash, output_hash, warnings_json, quality_signals_json, status,
+          started_at, finished_at, created_at, updated_at,
+          external_job_id, external_trace_path, external_manifest_path,
+          primary_worker, worker_chain_json, promotion_status, promotion_reason
+        )
+        VALUES (?, ?, NULL, 'swallow', ?, ?, ?, ?, ?, 'skipped_no_content_change',
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, 'skipped_no_content_change', ?)
+        """,
+        (
+            converter_run_id,
+            doc_id,
+            provenance.swallow_version if provenance else "unknown",
+            archive_hash,
+            output_hash,
+            _json(quality_signals.get("warnings", [])),
+            _json(quality_signals | {"no_content_change": True}),
+            now,
+            now,
+            now,
+            now,
+            provenance.swallow_job_id if provenance else None,
+            provenance.trace_path if provenance else None,
+            provenance.manifest_path if provenance else None,
+            provenance.primary_worker if provenance else "export_archive_worker",
+            _json(list(provenance.worker_chain) if provenance else ["export_archive_worker"]),
+            promotion_reason,
+        ),
+    )
+
+
+def _insert_archive_failed_converter_run(
+    connection: sqlite3.Connection,
+    converter_run_id: str,
+    ingest_item_id: str,
+    doc_id: str,
+    archive_hash: str,
+    quality_signals: dict[str, object],
+    aggregate: ConversionCandidate,
+    promotion_reason: str,
+    now: str,
+) -> None:
+    provenance = aggregate.provenance
+    error_id = record_error(
+        connection,
+        component="conversion",
+        error_type="archive_conversion_failed",
+        message=promotion_reason,
+        user_message="Failed to promote archive conversation into Markdown.",
+        retryable=False,
+        payload={"ingest_item_id": ingest_item_id, "doc_id": doc_id},
+    )
+    connection.execute(
+        """
+        UPDATE ingest_items
+        SET error_id = ?, status = 'failed', updated_at = ?, finished_at = ?
+        WHERE ingest_item_id = ?
+        """,
+        (error_id, now, now, ingest_item_id),
+    )
+    connection.execute(
+        """
+        INSERT INTO converter_runs(
+          converter_run_id, doc_id, revision_id, converter_name, converter_version,
+          input_hash, output_hash, warnings_json, quality_signals_json, status,
+          started_at, finished_at, created_at, updated_at,
+          external_job_id, external_trace_path, external_manifest_path,
+          primary_worker, worker_chain_json, promotion_status, promotion_reason
+        )
+        VALUES (?, ?, NULL, 'swallow', ?, ?, NULL, ?, ?, 'failed',
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, 'failed', ?)
+        """,
+        (
+            converter_run_id,
+            doc_id,
+            provenance.swallow_version if provenance else "unknown",
+            archive_hash,
+            _json(quality_signals.get("warnings", [])),
+            _json(quality_signals | {"error_id": error_id}),
+            now,
+            now,
+            now,
+            now,
+            provenance.swallow_job_id if provenance else None,
+            provenance.trace_path if provenance else None,
+            provenance.manifest_path if provenance else None,
+            provenance.primary_worker if provenance else "export_archive_worker",
+            _json(list(provenance.worker_chain) if provenance else ["export_archive_worker"]),
+            promotion_reason,
+        ),
+    )
+    create_review_item(
+        connection,
+        review_type="conversion_low_quality",
+        target_type="converter_run",
+        target_id=converter_run_id,
+        reason=promotion_reason,
+        priority=40,
+    )
+
+
+def _current_revision_content_hash(connection: sqlite3.Connection, doc_id: str) -> str | None:
+    row = connection.execute(
+        """
+        SELECT dr.content_hash
+        FROM documents d
+        JOIN document_revisions dr ON dr.revision_id = d.current_revision_id
+        WHERE d.doc_id = ?
+        """,
+        (doc_id,),
+    ).fetchone()
+    return str(row["content_hash"]) if row is not None else None
+
+
+def _available_artifact_path(directory: Path, filename: str) -> Path:
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    index = 2
+    while True:
+        next_candidate = directory / f"{stem}-{index}{suffix}"
+        if not next_candidate.exists():
+            return next_candidate
+        index += 1
+
+
+def _json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _initial_ingest_status(supported_count: int, unsupported_count: int) -> str:
@@ -646,7 +2011,7 @@ def _count_review_items_for_ingest(connection: sqlite3.Connection, ingest_id: st
             JOIN ingest_items ii ON ii.doc_id = cr.doc_id
             JOIN ingest_runs ir ON ir.ingest_id = ii.ingest_id
             WHERE ii.ingest_id = ?
-              AND ii.status = 'failed'
+              AND ii.status IN ('failed', 'pending_review')
               AND cr.created_at >= ir.created_at
           )
         )
@@ -823,6 +2188,7 @@ def _ingest_successful_items_are_searchable(connection: sqlite3.Connection, inge
         FROM ingest_items
         WHERE ingest_id = ?
           AND status = 'succeeded'
+          AND doc_id IS NOT NULL
         """,
         (ingest_id,),
     ).fetchone()

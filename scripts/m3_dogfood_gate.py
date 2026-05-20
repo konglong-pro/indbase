@@ -1,4 +1,15 @@
-"""Run the M3 local dogfood gate against a temporary vault."""
+"""Historical v0.1 M3 dogfood gate (compatibility only — not a v0.2 release blocker).
+
+This script encodes pre-v0.2 assumptions:
+- default vault keeps swallow_ingest=false
+- ingest immediately writes revisions and becomes searchable
+
+Under v0.2 swallow rules those assumptions are intentionally false:
+- swallow_ingest=false -> legacy_conversion_retired
+- partial/low-quality candidates -> review-before-current (not searchable)
+
+Use scripts/v02_release_gate.py for the active release gate stack.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +26,8 @@ IND_B = ROOT / ".venv" / "Scripts" / "indb.exe"
 
 
 def main() -> None:
+    print("HISTORICAL_V01_M3_DOGFOOD_GATE=compatibility_only")
+    print("NOTE=not_a_v02_release_blocker; use scripts/v02_release_gate.py")
     root = ROOT / ".tmp" / f"m3-dogfood-gate-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     vault = root / "vault"
     sources = root / "sources"
@@ -211,6 +224,7 @@ def main() -> None:
     print(f"INDEX_REBUILD_EXIT={index_rebuild.returncode}")
     print(f"DOCTOR_EXIT={doctor.returncode}")
     print(f"DOGFOOD_ROOT={root}")
+    print("HISTORICAL_V01_M3_DOGFOOD_GATE=finished")
 
 
 def _is_expected_dogfood_error(error: dict[str, object]) -> bool:

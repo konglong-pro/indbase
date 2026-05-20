@@ -41,6 +41,10 @@ class VaultPaths:
         return self.root / "outputs" / "translations"
 
     @property
+    def outputs_exports(self) -> Path:
+        return self.root / "outputs" / "exports"
+
+    @property
     def outputs_summaries(self) -> Path:
         return self.root / "outputs" / "summaries"
 
@@ -77,6 +81,22 @@ class VaultPaths:
         return self.indbase_dir / "cache"
 
     @property
+    def artifacts(self) -> Path:
+        return self.indbase_dir / "artifacts"
+
+    @property
+    def swallow_cache(self) -> Path:
+        return self.cache / "swallow"
+
+    @property
+    def transition_cache(self) -> Path:
+        return self.cache / "transition"
+
+    @property
+    def transition_runtime(self) -> Path:
+        return self.indbase_dir / "runtime" / "transition"
+
+    @property
     def converter_run_cache(self) -> Path:
         return self.cache / "converter_runs"
 
@@ -94,13 +114,18 @@ class VaultPaths:
             self.sources,
             self.notes_atomic,
             self.outputs_translations,
+            self.outputs_exports,
             self.outputs_summaries,
+            self.transition_cache,
+            self.transition_runtime,
             self.assets,
             self.originals,
             self.indexes,
             self.logs,
             self.task_logs,
             self.cache,
+            self.artifacts,
+            self.swallow_cache,
             self.converter_run_cache,
             self.config_dir,
         )
@@ -125,6 +150,15 @@ class VaultPaths:
 
     def converter_candidate_path(self, converter_run_id: str) -> Path:
         return self.converter_run_cache / f"{converter_run_id}.md"
+
+    def artifact_dir(self, doc_id: str, converter_run_id: str) -> Path:
+        return self.artifacts / doc_id / converter_run_id
+
+    def output_run_export_dir(self, output_run_id: str) -> Path:
+        return self.outputs_exports / output_run_id
+
+    def output_run_evidence_dir(self, output_run_id: str) -> Path:
+        return self.artifacts / "output_runs" / output_run_id
 
     def relative_to_vault(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()

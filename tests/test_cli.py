@@ -1,11 +1,21 @@
+from dataclasses import replace
 import json
+import zipfile
 
 from typer.testing import CliRunner
 
 import indbase_core.normalizers as normalizers
 from indbase_core.chunker import chunk_current_revision
+from indbase_core.config import load_config, save_config
 from indbase_core.db import connect
 from indbase_core.ingest import run_m2_ingest_pipeline
+from indbase_core.swallow_adapter import (
+    ArchiveExpansionCandidate,
+    ArchiveLogicalDocumentCandidate,
+    ArtifactManifest,
+    ConversionCandidate,
+    SwallowProvenance,
+)
 from indbase_cli.main import app
 
 
@@ -82,6 +92,381 @@ def test_cli_ingest_runs_m3_searchable_pipeline(tmp_path) -> None:
     assert chunks["count"] == 1
     assert ingest_run["status"] == "succeeded"
     assert ingest_run["succeeded_items"] == 1
+
+
+def test_cli_ingest_file_and_folder_source_type_commands(tmp_path) -> None:
+    runner = CliRunner()
+    vault_path = tmp_path / "vault"
+    file_source = tmp_path / "file-note.md"
+    folder_source = tmp_path / "folder"
+    nested = folder_source / "nested"
+    file_source.write_text("# File Source\nBody\n", encoding="utf-8")
+    nested.mkdir(parents=True)
+    (nested / "folder-note.md").write_text("# Folder Source\nBody\n", encoding="utf-8")
+
+    init_result = runner.invoke(app, ["init", str(vault_path)])
+    file_result = runner.invoke(app, ["ingest", "file", str(file_source), "--vault", str(vault_path)])
+    folder_result = runner.invoke(
+        app,
+        ["ingest", "folder", str(folder_source), "--recursive", "--vault", str(vault_path)],
+    )
+
+    connection = connect(vault_path / ".indbase" / "db.sqlite")
+    try:
+        revision_count = connection.execute("SELECT COUNT(*) AS count FROM document_revisions").fetchone()
+    finally:
+        connection.close()
+
+    assert init_result.exit_code == 0
+    assert file_result.exit_code == 0
+    assert "Revisions written: 1" in file_result.output
+    assert folder_result.exit_code == 0
+    assert "Total: 1" in folder_result.output
+    assert "Searchable: yes" in folder_result.output
+    assert revision_count["count"] == 2
+
+
+def test_cli_ingest_url_source_type_is_feature_gated(tmp_path) -> None:
+    runner = CliRunner()
+    vault_path = tmp_path / "vault"
+
+    init_result = runner.invoke(app, ["init", str(vault_path)])
+    disabled_result = runner.invoke(
+        app,
+        ["ingest", "url", "https://example.com", "--vault", str(vault_path)],
+    )
+
+    config_path = vault_path / ".indbase" / "config" / "config.toml"
+    config = load_config(config_path)
+    save_config(replace(config, features=replace(config.features, swallow_ingest=True)), config_path)
+    web_disabled_result = runner.invoke(
+        app,
+        ["ingest", "url", "https://example.com", "--vault", str(vault_path)],
+    )
+
+    assert init_result.exit_code == 0
+    assert disabled_result.exit_code == 2
+    assert "features.swallow_ingest" in disabled_result.output
+    assert web_disabled_result.exit_code == 2
+    assert "features.web_ingest" in web_disabled_result.output
+
+
+def test_cli_ingest_url_uses_playwright_snapshot_chain(tmp_path, monkeypatch) -> None:
+    runner = CliRunner()
+    vault_path = tmp_path / "vault"
+    url = "https://Example.com/articles/playwright?b=1#fragment"
+
+    init_result = runner.invoke(app, ["init", str(vault_path)])
+    config_path = vault_path / ".indbase" / "config" / "config.toml"
+    config = load_config(config_path)
+    save_config(
+        replace(
+            config,
+            features=replace(config.features, swallow_ingest=True, web_ingest=True),
+            ingest=replace(
+                config.ingest,
+                swallow=replace(config.ingest.swallow, min_markdown_chars=10),
+            ),
+        ),
+        config_path,
+    )
+
+    def fake_convert_url(self, source_url: str) -> ConversionCandidate:
+        rendered = self.store_root / "jobs" / "job_url" / "intermediate" / "playwright" / "rendered.html"
+        screenshot = self.store_root / "jobs" / "job_url" / "intermediate" / "playwright" / "screenshot.png"
+        trace = self.store_root / "jobs" / "job_url" / "trace.jsonl"
+        manifest = self.store_root / "jobs" / "job_url" / "manifest.json"
+        ingest_document = self.store_root / "jobs" / "job_url" / "ingest_document.json"
+        rendered.parent.mkdir(parents=True, exist_ok=True)
+        rendered.write_text("<html><body>Playwright URL Snapshot Needle</body></html>", encoding="utf-8")
+        screenshot.write_bytes(b"png")
+        trace.write_text("{}", encoding="utf-8")
+        manifest.write_text("{}", encoding="utf-8")
+        ingest_document.write_text("{}", encoding="utf-8")
+        return ConversionCandidate(
+            title="Playwright URL Snapshot",
+            markdown_body="# Playwright URL Snapshot\n\nNeedle from local rendered snapshot.\n",
+            status="success",
+            quality_score=0.92,
+            provenance=SwallowProvenance(
+                swallow_job_id="job_url",
+                swallow_raw_id="raw_url",
+                swallow_document_id="swallow_doc_url",
+                swallow_version="test",
+                primary_worker="playwright_worker",
+                worker_version="0.1.0",
+                worker_chain=("playwright_worker@0.1.0", "quality_checker@0.1.0", "markdown_normalizer@0.1.0"),
+                trace_path="jobs/job_url/trace.jsonl",
+                manifest_path="jobs/job_url/manifest.json",
+                ingest_document_path="jobs/job_url/ingest_document.json",
+                requires_network=True,
+                access_context="public_url",
+            ),
+            artifact_manifest=ArtifactManifest(
+                required=(
+                    "jobs/job_url/trace.jsonl",
+                    "jobs/job_url/manifest.json",
+                    "jobs/job_url/ingest_document.json",
+                    "jobs/job_url/intermediate/playwright/rendered.html",
+                    "jobs/job_url/intermediate/playwright/screenshot.png",
+                )
+            ),
+            source_locators=(
+                {
+                    "kind": "web_snapshot",
+                    "url": source_url,
+                    "artifact": "jobs/job_url/intermediate/playwright/rendered.html",
+                    "selector": None,
+                },
+            ),
+            source_snapshot_path="jobs/job_url/intermediate/playwright/rendered.html",
+            access_context="public_url",
+        )
+
+    monkeypatch.setattr("indbase_core.swallow_adapter.SwallowIngestAdapter.convert_url", fake_convert_url)
+
+    ingest_result = runner.invoke(app, ["ingest", "url", url, "--vault", str(vault_path)])
+    search_result = runner.invoke(app, ["search", "Needle", "--vault", str(vault_path)])
+
+    connection = connect(vault_path / ".indbase" / "db.sqlite")
+    try:
+        document = connection.execute(
+            """
+            SELECT source_type, source_uri, normalized_source_uri, source_snapshot_path,
+                   current_revision_id, ingest_status, fts_status, access_context
+            FROM documents
+            """
+        ).fetchone()
+        source_file = connection.execute(
+            """
+            SELECT original_ext, source_snapshot_path, access_context
+            FROM source_files
+            """
+        ).fetchone()
+        converter = connection.execute(
+            """
+            SELECT converter_name, primary_worker, promotion_status
+            FROM converter_runs
+            """
+        ).fetchone()
+        source_locator = connection.execute("SELECT source_locator_json FROM chunks").fetchone()
+    finally:
+        connection.close()
+
+    assert init_result.exit_code == 0
+    assert ingest_result.exit_code == 0
+    assert "Searchable: yes" in ingest_result.output
+    assert search_result.exit_code == 0
+    assert "Needle" in search_result.output
+    assert document["source_type"] == "url"
+    assert document["source_uri"] == url
+    assert document["normalized_source_uri"] == "https://example.com/articles/playwright?b=1"
+    assert document["source_snapshot_path"].endswith("rendered.html")
+    assert (vault_path / document["source_snapshot_path"]).is_file()
+    assert document["current_revision_id"] is not None
+    assert document["ingest_status"] == "revisioned"
+    assert document["fts_status"] == "indexed"
+    assert document["access_context"] == "public_url"
+    assert source_file["original_ext"] == "url"
+    assert source_file["source_snapshot_path"] == document["source_snapshot_path"]
+    assert source_file["access_context"] == "public_url"
+    assert converter["converter_name"] == "swallow"
+    assert converter["primary_worker"] == "playwright_worker"
+    assert converter["promotion_status"] == "trusted-current"
+    locator = json.loads(source_locator["source_locator_json"])[0]
+    assert locator["kind"] == "web_snapshot"
+    assert locator["artifact"] == document["source_snapshot_path"]
+
+
+def test_cli_ingest_archive_expands_one_to_many_logical_documents(tmp_path, monkeypatch) -> None:
+    runner = CliRunner()
+    vault_path = tmp_path / "vault"
+    archive = tmp_path / "chatgpt-export.zip"
+    with zipfile.ZipFile(archive, "w") as archive_file:
+        archive_file.writestr(
+            "conversations.json",
+            json.dumps({"conversations": []}, ensure_ascii=False),
+        )
+
+    init_result = runner.invoke(app, ["init", str(vault_path)])
+    config_path = vault_path / ".indbase" / "config" / "config.toml"
+    config = load_config(config_path)
+    save_config(replace(config, features=replace(config.features, swallow_ingest=True)), config_path)
+
+    def fake_expand_archive(self, source_archive):
+        conversations = self.store_root / "jobs" / "job_archive" / "intermediate" / "export_archive" / "conversations.json"
+        trace = self.store_root / "jobs" / "job_archive" / "trace.jsonl"
+        manifest = self.store_root / "jobs" / "job_archive" / "manifest.json"
+        ingest_document = self.store_root / "jobs" / "job_archive" / "ingest_document.json"
+        conversations.parent.mkdir(parents=True, exist_ok=True)
+        conversations.write_text('{"conversations": []}\n', encoding="utf-8")
+        trace.write_text("{}", encoding="utf-8")
+        manifest.write_text("{}", encoding="utf-8")
+        ingest_document.write_text("{}", encoding="utf-8")
+        conversation_artifact = "jobs/job_archive/intermediate/export_archive/conversations.json"
+        aggregate = ConversionCandidate(
+            title="ChatGPT Export",
+            markdown_body="# ChatGPT Export\n\nAlpha archive needle\n\nBeta archive needle\n",
+            status="success",
+            quality_score=0.96,
+            provenance=SwallowProvenance(
+                swallow_job_id="job_archive",
+                swallow_raw_id="raw_archive",
+                swallow_document_id="swallow_doc_archive",
+                swallow_version="test",
+                primary_worker="export_archive_worker",
+                worker_version="0.1.0",
+                worker_chain=("export_archive_worker@0.1.0", "quality_checker@0.1.0", "markdown_normalizer@0.1.0"),
+                trace_path="jobs/job_archive/trace.jsonl",
+                manifest_path="jobs/job_archive/manifest.json",
+                ingest_document_path="jobs/job_archive/ingest_document.json",
+                access_context="local_archive",
+            ),
+            artifact_manifest=ArtifactManifest(
+                required=(
+                    "jobs/job_archive/trace.jsonl",
+                    "jobs/job_archive/manifest.json",
+                    "jobs/job_archive/ingest_document.json",
+                    conversation_artifact,
+                )
+            ),
+            access_context="local_archive",
+        )
+        logical_documents = (
+                ArchiveLogicalDocumentCandidate(
+                    logical_source_id="conv-alpha",
+                    title="Alpha Conversation",
+                    markdown_body=(
+                        "# Alpha Conversation\n\n"
+                        "## 1. user\n\n"
+                        "Alpha archive needle. This fixture includes enough trusted conversation "
+                        "text to satisfy the promotion policy length gate.\n"
+                    ),
+                source_locators=(
+                    {
+                        "kind": "archive_member",
+                        "archive_type": "chatgpt_export",
+                        "member_path": "conversations.json",
+                        "logical_source_id": "conv-alpha",
+                        "conversation_index": 1,
+                        "artifact": conversation_artifact,
+                    },
+                ),
+                metadata={"archive_type": "chatgpt_export", "conversation_index": 1, "message_count": 1},
+            ),
+                ArchiveLogicalDocumentCandidate(
+                    logical_source_id="conv-beta",
+                    title="Beta Conversation",
+                    markdown_body=(
+                        "# Beta Conversation\n\n"
+                        "## 1. user\n\n"
+                        "Beta archive needle. This fixture includes enough trusted conversation "
+                        "text to satisfy the promotion policy length gate.\n"
+                    ),
+                source_locators=(
+                    {
+                        "kind": "archive_member",
+                        "archive_type": "chatgpt_export",
+                        "member_path": "conversations.json",
+                        "logical_source_id": "conv-beta",
+                        "conversation_index": 2,
+                        "artifact": conversation_artifact,
+                    },
+                ),
+                metadata={"archive_type": "chatgpt_export", "conversation_index": 2, "message_count": 1},
+            ),
+        )
+        return ArchiveExpansionCandidate(
+            archive_type="chatgpt_export",
+            aggregate_candidate=aggregate,
+            logical_documents=logical_documents,
+        )
+
+    monkeypatch.setattr("indbase_core.swallow_adapter.SwallowIngestAdapter.expand_archive", fake_expand_archive)
+
+    ingest_result = runner.invoke(app, ["ingest", "archive", str(archive), "--vault", str(vault_path)])
+    alpha_search = runner.invoke(app, ["search", "Alpha", "--vault", str(vault_path)])
+    beta_search = runner.invoke(app, ["search", "Beta", "--vault", str(vault_path)])
+
+    connection = connect(vault_path / ".indbase" / "db.sqlite")
+    try:
+        documents = connection.execute(
+            """
+            SELECT doc_id, source_type, original_path, source_snapshot_path,
+                   current_revision_id, fts_status, access_context
+            FROM documents
+            ORDER BY title
+            """
+        ).fetchall()
+        original_paths = {
+            row["original_path"]
+            for row in connection.execute("SELECT original_path FROM source_files").fetchall()
+        }
+        items = connection.execute(
+            """
+            SELECT ingest_item_id, status, parent_ingest_item_id, logical_source_id
+            FROM ingest_items
+            ORDER BY parent_ingest_item_id IS NOT NULL, logical_source_id
+            """
+        ).fetchall()
+        converter_count = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM converter_runs
+            WHERE primary_worker = 'export_archive_worker'
+              AND promotion_status = 'trusted-current'
+            """
+        ).fetchone()["count"]
+        chunk_locators = connection.execute(
+            "SELECT source_locator_json FROM chunks ORDER BY sequence"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert init_result.exit_code == 0
+    assert ingest_result.exit_code == 0
+    assert "Total: 3" in ingest_result.output
+    assert "Revisions written: 2" in ingest_result.output
+    assert "Searchable: yes" in ingest_result.output
+    assert alpha_search.exit_code == 0
+    assert "Alpha archive needle" in alpha_search.output
+    assert beta_search.exit_code == 0
+    assert "Beta archive needle" in beta_search.output
+    assert len(documents) == 2
+    assert {document["source_type"] for document in documents} == {"chatgpt_conversation"}
+    assert all(document["current_revision_id"] for document in documents)
+    assert all(document["fts_status"] == "indexed" for document in documents)
+    assert all(document["access_context"] == "local_archive" for document in documents)
+    assert len(original_paths) == 1
+    assert (vault_path / next(iter(original_paths))).is_file()
+    assert len(items) == 3
+    assert items[0]["parent_ingest_item_id"] is None
+    assert {item["parent_ingest_item_id"] for item in items[1:]} == {items[0]["ingest_item_id"]}
+    assert {item["logical_source_id"] for item in items[1:]} == {"conv-alpha", "conv-beta"}
+    assert converter_count == 2
+    assert len(chunk_locators) == 2
+    for row in chunk_locators:
+        locator = json.loads(row["source_locator_json"])[0]
+        assert locator["kind"] == "archive_member"
+        assert locator["source_path"] in original_paths
+        assert locator["artifact"].endswith("conversations.json")
+
+
+def test_cli_ingest_media_source_type_is_asr_gated(tmp_path) -> None:
+    runner = CliRunner()
+    vault_path = tmp_path / "vault"
+    media_source = tmp_path / "clip.mp3"
+    media_source.write_bytes(b"not real audio")
+
+    init_result = runner.invoke(app, ["init", str(vault_path)])
+    config_path = vault_path / ".indbase" / "config" / "config.toml"
+    config = load_config(config_path)
+    save_config(replace(config, features=replace(config.features, swallow_ingest=True)), config_path)
+    result = runner.invoke(app, ["ingest", "media", str(media_source), "--vault", str(vault_path)])
+
+    assert init_result.exit_code == 0
+    assert result.exit_code == 2
+    assert "features.asr" in result.output
 
 
 def test_cli_index_rebuild_fts_indexes_current_chunks(tmp_path) -> None:

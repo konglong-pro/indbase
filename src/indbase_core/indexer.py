@@ -101,6 +101,20 @@ def rebuild_fts_index(connection: sqlite3.Connection, vault_path: Path | str) ->
     )
 
 
+def reindex_document_fts(connection: sqlite3.Connection, vault_path: Path | str, doc_id: str) -> None:
+    """Rebuild FTS rows for one document's current revision only."""
+    refresh_document_fts_metadata(connection, doc_id)
+    now = utc_now_iso()
+    connection.execute(
+        """
+        UPDATE documents
+        SET fts_status = 'indexed', updated_at = ?
+        WHERE doc_id = ?
+        """,
+        (now, doc_id),
+    )
+
+
 def refresh_document_fts_metadata(connection: sqlite3.Connection, doc_id: str) -> None:
     """Refresh title/category/tag FTS columns for one document's current chunks."""
     document = connection.execute(

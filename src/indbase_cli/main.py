@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import sqlite3
@@ -11,6 +12,7 @@ from contextlib import contextmanager
 import typer
 from rich.console import Console
 from rich.table import Table
+from typer.core import TyperGroup
 
 from indbase_core.categories import (
     add_category,
@@ -35,7 +37,11 @@ from indbase_core.classification import (
     reject_classification_suggestion,
     suggest_classifications,
 )
-from indbase_core.config import SearchConfig, load_config
+from indbase_core.candidate_review import (
+    accept_conversion_candidate_review,
+    reject_conversion_candidate_review,
+)
+from indbase_core.config import ConfigError, IngestConfig as CoreIngestConfig, SearchConfig, load_config
 from indbase_core.db import connect
 from indbase_core.documents import (
     archive_document,
@@ -47,7 +53,11 @@ from indbase_core.documents import (
 from indbase_core.doctor import run_doctor
 from indbase_core.embeddings import rebuild_vector_index
 from indbase_core.errors import get_error, list_errors
-from indbase_core.ingest import run_m3_ingest_pipeline
+from indbase_core.ingest import (
+    run_m3_archive_ingest_pipeline,
+    run_m3_ingest_pipeline,
+    run_m3_url_ingest_pipeline,
+)
 from indbase_core.indexer import rebuild_fts_index
 from indbase_core.ocr import list_ocr_pages, run_ocr_for_document
 from indbase_core.reviews import get_review_item, list_review_items, resolve_review_item, resolve_review_items
@@ -70,6 +80,14 @@ from indbase_core.translations import (
     translate_full_document,
     translate_selected_chunks,
 )
+from indbase_core.output_queries import get_output_run, list_output_runs, resolve_output_artifact_path
+from indbase_core.output_service import (
+    export_accepted_note,
+    export_source_revision,
+    export_translation,
+    normalize_replace_current,
+)
+from indbase_core.transition_runtime import TransitionRuntimeError, install_runtime, runtime_status
 from indbase_core.vault import init_vault
 from indbase_core.version import __version__
 from indbase_cli.tui_lite import run_tui_lite
@@ -77,6 +95,47 @@ from indbase_cli.tui_lite import run_tui_lite
 app = typer.Typer(
     add_completion=False,
     help="Local-first personal knowledge database.",
+    no_args_is_help=True,
+)
+
+
+class IngestSourceTypeGroup(TyperGroup):
+    default_command_name = "path"
+
+    def resolve_command(self, ctx, args):
+        if args:
+            cmd_name = args[0]
+            cmd = self.get_command(ctx, cmd_name)
+            if cmd is None and not cmd_name.startswith("-"):
+                default = self.get_command(ctx, self.default_command_name)
+                if default is not None:
+                    return self.default_command_name, default, args
+        return super().resolve_command(ctx, args)
+
+
+LOCAL_MEDIA_EXTENSIONS = (
+    "aac",
+    "aiff",
+    "flac",
+    "m4a",
+    "mkv",
+    "mov",
+    "mp3",
+    "mp4",
+    "mpeg",
+    "mpga",
+    "oga",
+    "ogg",
+    "opus",
+    "wav",
+    "webm",
+    "wma",
+)
+
+
+ingest_app = typer.Typer(
+    cls=IngestSourceTypeGroup,
+    help="Ingest sources by explicit source type.",
     no_args_is_help=True,
 )
 catalog_app = typer.Typer(help="Manage manual categories.", no_args_is_help=True)
@@ -90,6 +149,9 @@ ocr_app = typer.Typer(help="Run and inspect OCR records.", no_args_is_help=True)
 classification_app = typer.Typer(help="Create and review classification suggestions.", no_args_is_help=True)
 translation_app = typer.Typer(help="Create and inspect translation outputs.", no_args_is_help=True)
 card_app = typer.Typer(help="Create and inspect candidate card records.", no_args_is_help=True)
+output_app = typer.Typer(help="Transition-backed output export and runtime.", no_args_is_help=True)
+output_runtime_app = typer.Typer(help="Manage per-vault transition runtime.", no_args_is_help=True)
+output_export_app = typer.Typer(help="Read-only output export.", no_args_is_help=True)
 console = Console()
 
 
@@ -135,9 +197,9 @@ def init(
     console.print(f"Categories inserted: {result.inserted_categories}")
 
 
-@app.command()
-def ingest(
-    source_input: Path = typer.Argument(..., help="File or folder to ingest through M2 revision writing."),
+@ingest_app.command("path", hidden=True)
+def ingest_legacy_path(
+    source_input: Path = typer.Argument(..., help="File or folder to ingest."),
     vault: Path = typer.Option(
         Path("."),
         "--vault",
@@ -149,30 +211,122 @@ def ingest(
         help="Recursively scan folders.",
     ),
 ) -> None:
-    """Ingest local files through source Markdown, chunks, and FTS indexing."""
-    db_path = vault / ".indbase" / "db.sqlite"
-    if not db_path.is_file():
-        console.print(f"[red]Vault database not found:[/red] {db_path}")
-        raise typer.Exit(2)
+    """Compatibility alias for local file or folder ingest."""
+    _run_local_ingest(vault, source_input, recursive=recursive)
 
-    result = run_m3_ingest_pipeline(vault, source_input, recursive=recursive)
-    console.print(f"Ingest run: {result.ingest_id}")
-    console.print(f"Task: {result.task_id}")
-    console.print(f"Status: {result.status}")
-    console.print(f"Total: {result.total_items}")
-    console.print(f"Revisions written: {result.written_revisions}")
-    console.print(f"Unsupported: {result.unsupported_items}")
-    console.print(f"Duplicates: {result.duplicate_items}")
-    console.print(f"Failed: {result.failed_items}")
-    console.print(f"Chunks written: {result.chunked_documents}")
-    console.print(f"Indexed documents: {result.indexed_documents}")
-    console.print(f"Indexed chunks: {result.indexed_chunks}")
-    console.print(f"Index failures: {result.index_failed_documents}")
-    console.print(f"Searchable: {_yes_no(result.searchable)}")
-    if result.status == "completed_with_issues":
-        raise typer.Exit(1)
-    if result.status == "failed":
+
+@ingest_app.command("file")
+def ingest_file(
+    source_input: Path = typer.Argument(..., help="Local file to ingest."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Ingest one local file through the indbase durable chain."""
+    if not source_input.is_file():
+        console.print(f"[red]Source is not a file:[/red] {source_input}")
         raise typer.Exit(2)
+    _run_local_ingest(vault, source_input, recursive=False)
+
+
+@ingest_app.command("folder")
+def ingest_folder(
+    source_input: Path = typer.Argument(..., help="Local folder to ingest."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+    recursive: bool = typer.Option(
+        False,
+        "--recursive",
+        help="Recursively scan folders.",
+    ),
+) -> None:
+    """Ingest a local folder through the indbase durable chain."""
+    if not source_input.is_dir():
+        console.print(f"[red]Source is not a folder:[/red] {source_input}")
+        raise typer.Exit(2)
+    _run_local_ingest(vault, source_input, recursive=recursive)
+
+
+@ingest_app.command("media")
+def ingest_media(
+    source_input: Path = typer.Argument(..., help="Local audio or video file to ingest through swallow ASR."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Ingest audio or video via the swallow conversion adapter."""
+    config = _load_vault_config_for_cli(vault)
+    _require_feature(config, "swallow_ingest", "use swallow media conversion")
+    _require_feature(config, "asr", "use ASR media ingest")
+    if not source_input.is_file():
+        console.print(f"[red]Source is not a file:[/red] {source_input}")
+        raise typer.Exit(2)
+    extension = source_input.suffix.lower().lstrip(".")
+    if extension not in LOCAL_MEDIA_EXTENSIONS:
+        console.print(f"[red]Source is not a supported media extension:[/red] .{extension}")
+        raise typer.Exit(2)
+    _run_local_ingest(vault, source_input, recursive=False, ingest_config=_media_ingest_config(config.ingest))
+
+
+@ingest_app.command("url")
+def ingest_url(
+    url: str = typer.Argument(..., help="URL to capture and ingest."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Capture a URL with local Playwright and ingest the resulting snapshot."""
+    config = _load_vault_config_for_cli(vault)
+    _require_feature(config, "swallow_ingest", "use swallow URL conversion")
+    _require_feature(config, "web_ingest", "capture URLs")
+    _run_url_ingest(vault, url)
+
+
+@ingest_app.command("browser-capture")
+def ingest_browser_capture(
+    capture_path: Path = typer.Argument(..., help="Browser capture JSON to ingest."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Validate browser-capture ingest policy before capture replay is wired."""
+    config = _load_vault_config_for_cli(vault)
+    _require_feature(config, "swallow_ingest", "use swallow browser-capture conversion")
+    _require_feature(config, "web_ingest", "ingest browser captures")
+    _require_feature(config, "login_profile_ingest", "use authenticated browser capture")
+    if not capture_path.is_file():
+        console.print(f"[red]Browser capture file not found:[/red] {capture_path}")
+        raise typer.Exit(2)
+    _fail_unwired_source_type("browser-capture", str(capture_path))
+
+
+@ingest_app.command("archive")
+def ingest_archive(
+    archive_path: Path = typer.Argument(..., help="Archive file to expand and ingest."),
+    vault: Path = typer.Option(
+        Path("."),
+        "--vault",
+        help="Vault directory.",
+    ),
+) -> None:
+    """Expand an archive into logical documents through swallow."""
+    config = _load_vault_config_for_cli(vault)
+    _require_feature(config, "swallow_ingest", "use swallow archive conversion")
+    if not archive_path.is_file():
+        console.print(f"[red]Archive file not found:[/red] {archive_path}")
+        raise typer.Exit(2)
+    _run_archive_ingest(vault, archive_path)
 
 
 @app.command()
@@ -1257,10 +1411,45 @@ def review_resolve(
         "--resolved-by",
         help="Resolver identifier.",
     ),
+    accept: bool = typer.Option(
+        False,
+        "--accept",
+        help="Accept and promote a conversion candidate review.",
+    ),
+    reject: bool = typer.Option(
+        False,
+        "--reject",
+        help="Reject a conversion candidate review without writing a revision.",
+    ),
 ) -> None:
-    """Mark a review item resolved without applying hidden fixes."""
+    """Resolve a review item; conversion candidates can be accepted or rejected explicitly."""
+    if accept and reject:
+        console.print("[red]Use only one of --accept or --reject.[/red]")
+        raise typer.Exit(2)
     with _existing_vault_connection(vault) as connection:
         try:
+            if accept:
+                result = accept_conversion_candidate_review(
+                    connection,
+                    vault,
+                    review_id,
+                    note=note,
+                    resolved_by=resolved_by,
+                )
+                console.print(
+                    f"Review {result.review_id}: accepted "
+                    f"doc_id={result.doc_id} revision_id={result.revision_id}"
+                )
+                return
+            if reject:
+                result = reject_conversion_candidate_review(
+                    connection,
+                    review_id,
+                    note=note,
+                    resolved_by=resolved_by,
+                )
+                console.print(f"Review {result.review_id}: rejected doc_id={result.doc_id}")
+                return
             row = resolve_review_item(connection, review_id, note=note, resolved_by=resolved_by)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
@@ -2366,6 +2555,107 @@ def _existing_vault_connection(vault_path: Path) -> Iterator[sqlite3.Connection]
         connection.close()
 
 
+def _run_local_ingest(
+    vault: Path,
+    source_input: Path,
+    *,
+    recursive: bool,
+    ingest_config: CoreIngestConfig | None = None,
+) -> None:
+    db_path = vault / ".indbase" / "db.sqlite"
+    if not db_path.is_file():
+        console.print(f"[red]Vault database not found:[/red] {db_path}")
+        raise typer.Exit(2)
+
+    try:
+        result = run_m3_ingest_pipeline(vault, source_input, recursive=recursive, ingest_config=ingest_config)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    _print_ingest_result(result)
+
+
+def _run_url_ingest(vault: Path, url: str) -> None:
+    db_path = vault / ".indbase" / "db.sqlite"
+    if not db_path.is_file():
+        console.print(f"[red]Vault database not found:[/red] {db_path}")
+        raise typer.Exit(2)
+
+    try:
+        result = run_m3_url_ingest_pipeline(vault, url)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    _print_ingest_result(result)
+
+
+def _run_archive_ingest(vault: Path, archive_path: Path) -> None:
+    db_path = vault / ".indbase" / "db.sqlite"
+    if not db_path.is_file():
+        console.print(f"[red]Vault database not found:[/red] {db_path}")
+        raise typer.Exit(2)
+
+    try:
+        result = run_m3_archive_ingest_pipeline(vault, archive_path)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    _print_ingest_result(result)
+
+
+def _print_ingest_result(result) -> None:
+    console.print(f"Ingest run: {result.ingest_id}")
+    console.print(f"Task: {result.task_id}")
+    console.print(f"Status: {result.status}")
+    console.print(f"Total: {result.total_items}")
+    console.print(f"Revisions written: {result.written_revisions}")
+    console.print(f"Unsupported: {result.unsupported_items}")
+    console.print(f"Duplicates: {result.duplicate_items}")
+    console.print(f"Failed: {result.failed_items}")
+    console.print(f"Chunks written: {result.chunked_documents}")
+    console.print(f"Indexed documents: {result.indexed_documents}")
+    console.print(f"Indexed chunks: {result.indexed_chunks}")
+    console.print(f"Index failures: {result.index_failed_documents}")
+    console.print(f"Searchable: {_yes_no(result.searchable)}")
+    if result.status == "completed_with_issues":
+        raise typer.Exit(1)
+    if result.status == "failed":
+        raise typer.Exit(2)
+
+
+def _load_vault_config_for_cli(vault: Path):
+    config_path = vault / ".indbase" / "config" / "config.toml"
+    if not config_path.is_file():
+        console.print(f"[red]Vault config not found:[/red] {config_path}")
+        raise typer.Exit(2)
+    try:
+        return load_config(config_path)
+    except ConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+
+def _require_feature(config, feature_name: str, action: str) -> None:
+    if not getattr(config.features, feature_name):
+        console.print(f"[red]Source type disabled:[/red] set features.{feature_name} = true to {action}.")
+        raise typer.Exit(2)
+
+
+def _media_ingest_config(config: CoreIngestConfig) -> CoreIngestConfig:
+    tier2_extensions = tuple(dict.fromkeys((*config.tier2_extensions, *LOCAL_MEDIA_EXTENSIONS)))
+    return replace(config, tier2_extensions=tier2_extensions)
+
+
+def _fail_unwired_source_type(source_type: str, source_input: str) -> None:
+    console.print(
+        f"[red]{source_type} ingest is not wired to the indbase durable ingest chain yet.[/red]"
+    )
+    console.print(f"Source input: {source_input}")
+    console.print("No document, revision, chunk, FTS, or citation state was written.")
+    raise typer.Exit(2)
+
+
 def _yes_no(value: object) -> str:
     return "yes" if bool(value) else "no"
 
@@ -2462,6 +2752,7 @@ def _json_array_for_cli(value: object) -> list[object]:
     return parsed
 
 
+app.add_typer(ingest_app, name="ingest")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(task_app, name="task")
 app.add_typer(index_app, name="index")
@@ -2473,3 +2764,302 @@ app.add_typer(ocr_app, name="ocr")
 app.add_typer(classification_app, name="classify")
 app.add_typer(translation_app, name="translate")
 app.add_typer(card_app, name="card")
+app.add_typer(output_app, name="output")
+output_app.add_typer(output_runtime_app, name="runtime")
+output_app.add_typer(output_export_app, name="export")
+
+
+@output_runtime_app.command("install")
+def output_runtime_install(
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    skip_npm: bool = typer.Option(
+        False,
+        "--skip-npm",
+        help="Install bridge and config only (for tests); does not run npm install.",
+    ),
+) -> None:
+    """Explicitly install the per-vault transition runtime."""
+    try:
+        result = install_runtime(vault, run_npm_install=not skip_npm)
+    except TransitionRuntimeError as exc:
+        console.print(f"[red]Runtime install failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"Transition runtime installed under {result.runtime_dir}")
+    console.print(f"Pinned commit: {result.transition_commit}")
+    if result.previous_run_count:
+        console.print(
+            f"[yellow]Note:[/yellow] {result.previous_run_count} existing output run(s) "
+            "were built with a previous runtime commit."
+        )
+
+
+@output_runtime_app.command("status")
+def output_runtime_status(
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Show transition runtime readiness for a vault."""
+    status = runtime_status(vault)
+    payload = {
+        "vault_path": status.vault_path.as_posix(),
+        "transition_output_enabled": status.transition_output_enabled,
+        "runtime_dir": status.runtime_dir.as_posix(),
+        "bridge_present": status.bridge_present,
+        "config_present": status.config_present,
+        "node_modules_present": status.node_modules_present,
+        "node_available": status.node_available,
+        "recorded_commit": status.recorded_commit,
+        "existing_output_runs": status.existing_output_runs,
+    }
+    if json_output:
+        console.print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    for key, value in payload.items():
+        console.print(f"{key}: {value}")
+
+
+def _parse_export_targets(to: list[str]) -> tuple[str, ...]:
+    return tuple(item.lower().removeprefix("--to").strip() for item in to if item.strip())
+
+
+@output_export_app.command("source")
+def output_export_source(
+    doc_id: str = typer.Argument(..., help="Source document id."),
+    revision_id: str | None = typer.Option(None, "--revision", help="Exact revision to export."),
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    to: list[str] = typer.Option([], "--to", help="Optional html, pdf, or docx targets."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Export a source revision through the transition bridge."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = export_source_revision(
+                connection,
+                vault,
+                doc_id=doc_id,
+                revision_id_value=revision_id,
+                targets=_parse_export_targets(to),
+                bridge_runner=None,
+            )
+        except (TransitionRuntimeError, ValueError) as exc:
+            console.print(f"[red]Export failed:[/red] {exc}")
+            raise typer.Exit(1) from exc
+    payload = {
+        "output_run_id": result.output_run_id,
+        "task_id": result.task_id,
+        "status": result.status,
+        "export_dir": result.export_dir,
+        "warnings": list(result.warnings),
+    }
+    if json_output:
+        console.print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Output run: {result.output_run_id}")
+    console.print(f"Status: {result.status}")
+    if result.export_dir:
+        console.print(f"Export dir: {result.export_dir}")
+    for warning in result.warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+
+
+@output_export_app.command("translation")
+def output_export_translation_cmd(
+    translation_id: str = typer.Argument(..., help="Translation id."),
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    to: list[str] = typer.Option([], "--to", help="Optional html, pdf, or docx targets."),
+) -> None:
+    """Export a translation output through the transition bridge."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = export_translation(
+                connection,
+                vault,
+                translation_id=translation_id,
+                targets=_parse_export_targets(to),
+            )
+        except (TransitionRuntimeError, ValueError) as exc:
+            console.print(f"[red]Export failed:[/red] {exc}")
+            raise typer.Exit(1) from exc
+    console.print(f"Output run: {result.output_run_id} ({result.status})")
+
+
+@output_app.command("list")
+def output_list(
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    status: str | None = typer.Option(None, "--status", help="Filter by output run status."),
+    input_kind: str | None = typer.Option(None, "--input-kind", help="Filter by input kind."),
+    doc_id: str | None = typer.Option(None, "--doc-id", help="Filter by source doc id."),
+    limit: int = typer.Option(50, "--limit", help="Maximum rows to show."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """List transition output runs."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_output_runs(
+            connection,
+            status=status,
+            input_kind=input_kind,
+            source_doc_id=doc_id,
+            limit=limit,
+        )
+    payload = [
+        {
+            "output_run_id": row["output_run_id"],
+            "task_id": row["task_id"],
+            "mode": row["mode"],
+            "input_kind": row["input_kind"],
+            "input_id": row["input_id"],
+            "source_doc_id": row["source_doc_id"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "finished_at": row["finished_at"],
+        }
+        for row in rows
+    ]
+    if json_output:
+        console.print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if not payload:
+        console.print("No output runs found.")
+        return
+    table = Table(title="Output Runs")
+    for column in ("output_run_id", "mode", "input_kind", "input_id", "status", "created_at"):
+        table.add_column(column)
+    for row in payload:
+        table.add_row(
+            str(row["output_run_id"]),
+            str(row["mode"]),
+            str(row["input_kind"]),
+            str(row["input_id"] or ""),
+            str(row["status"]),
+            str(row["created_at"]),
+        )
+    console.print(table)
+
+
+@output_app.command("show")
+def output_show(
+    output_run_id: str = typer.Argument(..., help="Output run id."),
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Show one output run and its artifacts."""
+    with _existing_vault_connection(vault) as connection:
+        view = get_output_run(connection, output_run_id)
+    if view is None:
+        console.print(f"[red]Output run not found:[/red] {output_run_id}")
+        raise typer.Exit(1)
+    payload = {
+        "output_run_id": view.output_run_id,
+        "task_id": view.task_id,
+        "mode": view.mode,
+        "input_kind": view.input_kind,
+        "input_id": view.input_id,
+        "status": view.status,
+        "source_doc_id": view.source_doc_id,
+        "source_revision_id": view.source_revision_id,
+        "created_revision_id": view.created_revision_id,
+        "evidence_manifest_path": view.evidence_manifest_path,
+        "artifacts": [
+            {
+                "format": artifact.format,
+                "path": artifact.path,
+                "status": artifact.status,
+                "sha256": artifact.sha256,
+            }
+            for artifact in view.artifacts
+        ],
+    }
+    if json_output:
+        console.print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    for key, value in payload.items():
+        if key == "artifacts":
+            continue
+        console.print(f"{key}: {value}")
+    console.print("artifacts:")
+    for artifact in view.artifacts:
+        console.print(f"  - {artifact.format}: {artifact.path} ({artifact.status})")
+
+
+@output_app.command("open")
+def output_open(
+    output_run_id: str = typer.Argument(..., help="Output run id."),
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    format_name: str = typer.Option(
+        "md",
+        "--format",
+        help="Artifact format: md, html, pdf, or docx.",
+    ),
+    folder: bool = typer.Option(False, "--folder", help="Open the artifact directory."),
+) -> None:
+    """Open an output artifact path."""
+    import os
+    import subprocess
+    import sys
+
+    with _existing_vault_connection(vault) as connection:
+        try:
+            target = resolve_output_artifact_path(
+                connection,
+                vault,
+                output_run_id,
+                format_name=format_name.lower(),
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    open_target = target.parent if folder else target
+    if sys.platform.startswith("win"):
+        os.startfile(open_target)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(open_target)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(open_target)], check=False)
+    console.print(str(open_target))
+
+
+@output_export_app.command("note")
+def output_export_note_cmd(
+    candidate_card_id: str = typer.Argument(..., help="Accepted candidate_card_id."),
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    to: list[str] = typer.Option([], "--to", help="Optional html, pdf, or docx targets."),
+) -> None:
+    """Export an accepted atomic note through the transition bridge."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = export_accepted_note(
+                connection,
+                vault,
+                candidate_card_id=candidate_card_id,
+                targets=_parse_export_targets(to),
+            )
+        except (TransitionRuntimeError, ValueError) as exc:
+            console.print(f"[red]Export failed:[/red] {exc}")
+            raise typer.Exit(1) from exc
+    console.print(f"Output run: {result.output_run_id} ({result.status})")
+
+
+@doc_app.command("normalize")
+def doc_normalize_replace_current_cmd(
+    doc_id: str = typer.Argument(..., help="Active source document id."),
+    vault: Path = typer.Option(Path.cwd(), "--vault", help="Vault root path."),
+    replace_current: bool = typer.Option(
+        True,
+        "--replace-current/--no-replace-current",
+        help="Create a promoted replacement revision.",
+    ),
+) -> None:
+    """Normalize current source Markdown via transition."""
+    if not replace_current:
+        console.print("[red]Only --replace-current is supported in v1.[/red]")
+        raise typer.Exit(2)
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = normalize_replace_current(connection, vault, doc_id=doc_id)
+        except (TransitionRuntimeError, ValueError) as exc:
+            console.print(f"[red]Normalize failed:[/red] {exc}")
+            raise typer.Exit(1) from exc
+    console.print(f"Normalize run: {result.output_run_id}")
+    console.print(f"Status: {result.status}")
+    if result.created_revision_id:
+        console.print(f"New revision: {result.created_revision_id}")

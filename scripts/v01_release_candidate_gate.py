@@ -1,4 +1,7 @@
-"""Run the v0.1 release-candidate hardening gate."""
+"""Historical v0.1 release-candidate hardening gate (predates v0.2 defaults).
+
+For active release verification use scripts/v02_release_gate.py instead.
+"""
 
 from __future__ import annotations
 

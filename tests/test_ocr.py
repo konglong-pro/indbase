@@ -294,7 +294,7 @@ def test_forced_ocr_success_replaces_current_revision_and_current_fts_only(tmp_p
     assert result.revision_id is not None
     assert before["current_revision_id"] != after["current_revision_id"]
     assert after["current_revision_id"] == result.revision_id
-    assert [row["converter_name"] for row in revisions] == ["markitdown", "ocr_sidecar"]
+    assert [row["converter_name"] for row in revisions] == ["swallow", "ocr_sidecar"]
     assert revisions[0]["current_chunks"] == 0
     assert revisions[1]["current_chunks"] >= 1
     assert old_search.result_count == 0

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 import sqlite3
 
@@ -5,11 +6,24 @@ import indbase_core.doctor as doctor_module
 import indbase_core.normalizers as normalizers
 from indbase_core.cards import accept_candidate_card, generate_candidate_card
 from indbase_core.chunker import chunk_current_revision
+from indbase_core.config import default_config, save_config
 from indbase_core.db import connect
 from indbase_core.doctor import run_doctor
 from indbase_core.indexer import rebuild_fts_index
-from indbase_core.ingest import run_m2_ingest_pipeline, run_m3_ingest_pipeline
+from indbase_core.ingest import (
+    run_m2_ingest_pipeline,
+    run_m3_archive_ingest_pipeline,
+    run_m3_ingest_pipeline,
+    run_m3_url_ingest_pipeline,
+)
 from indbase_core.ocr import run_ocr_for_document
+from indbase_core.swallow_adapter import (
+    ArchiveExpansionCandidate,
+    ArchiveLogicalDocumentCandidate,
+    ArtifactManifest,
+    ConversionCandidate,
+    SwallowProvenance,
+)
 from indbase_core.time import utc_now_iso
 from indbase_core.translations import translate_full_document
 from indbase_core.vault import init_vault
@@ -36,6 +50,128 @@ def _finding(report, code: str):
     return next(finding for finding in report.findings if finding.code == code)
 
 
+def _enable_swallow(vault: Path, *, web_ingest: bool = False) -> None:
+    config = default_config(vault)
+    config = replace(
+        config,
+        features=replace(config.features, swallow_ingest=True, web_ingest=web_ingest),
+        ingest=replace(config.ingest, swallow=replace(config.ingest.swallow, min_markdown_chars=10)),
+    )
+    save_config(config, vault / ".indbase" / "config" / "config.toml")
+
+
+def _fake_url_candidate(adapter, source_url: str) -> ConversionCandidate:
+    rendered = adapter.store_root / "jobs" / "doctor_url" / "intermediate" / "playwright" / "rendered.html"
+    trace = adapter.store_root / "jobs" / "doctor_url" / "trace.jsonl"
+    manifest = adapter.store_root / "jobs" / "doctor_url" / "manifest.json"
+    ingest_document = adapter.store_root / "jobs" / "doctor_url" / "ingest_document.json"
+    rendered.parent.mkdir(parents=True, exist_ok=True)
+    rendered.write_text("<html><body>Doctor URL Locator Needle</body></html>", encoding="utf-8")
+    trace.write_text("{}", encoding="utf-8")
+    manifest.write_text("{}", encoding="utf-8")
+    ingest_document.write_text("{}", encoding="utf-8")
+    rendered_rel = "jobs/doctor_url/intermediate/playwright/rendered.html"
+    return ConversionCandidate(
+        title="Doctor URL",
+        markdown_body="# Doctor URL\n\nDoctor URL Locator Needle searchable.\n",
+        status="success",
+        quality_score=0.95,
+        provenance=SwallowProvenance(
+            swallow_job_id="doctor_url",
+            swallow_raw_id="raw_doctor_url",
+            swallow_document_id="doc_doctor_url",
+            swallow_version="test",
+            primary_worker="playwright_worker",
+            worker_version="0.1.0",
+            worker_chain=("playwright_worker@0.1.0", "quality_checker@0.1.0", "markdown_normalizer@0.1.0"),
+            trace_path="jobs/doctor_url/trace.jsonl",
+            manifest_path="jobs/doctor_url/manifest.json",
+            ingest_document_path="jobs/doctor_url/ingest_document.json",
+            requires_network=True,
+            access_context="public_url",
+        ),
+        artifact_manifest=ArtifactManifest(
+            required=(
+                "jobs/doctor_url/trace.jsonl",
+                "jobs/doctor_url/manifest.json",
+                "jobs/doctor_url/ingest_document.json",
+                rendered_rel,
+            )
+        ),
+        source_locators=(
+            {
+                "kind": "web_snapshot",
+                "url": source_url,
+                "artifact": rendered_rel,
+            },
+        ),
+        source_snapshot_path=rendered_rel,
+        access_context="public_url",
+    )
+
+
+def _fake_archive_expansion(adapter, _source_archive: Path) -> ArchiveExpansionCandidate:
+    conversations = adapter.store_root / "jobs" / "doctor_archive" / "intermediate" / "export_archive" / "conversations.json"
+    trace = adapter.store_root / "jobs" / "doctor_archive" / "trace.jsonl"
+    manifest = adapter.store_root / "jobs" / "doctor_archive" / "manifest.json"
+    ingest_document = adapter.store_root / "jobs" / "doctor_archive" / "ingest_document.json"
+    conversations.parent.mkdir(parents=True, exist_ok=True)
+    conversations.write_text('{"conversations": []}\n', encoding="utf-8")
+    trace.write_text("{}", encoding="utf-8")
+    manifest.write_text("{}", encoding="utf-8")
+    ingest_document.write_text("{}", encoding="utf-8")
+    conversation_artifact = "jobs/doctor_archive/intermediate/export_archive/conversations.json"
+    aggregate = ConversionCandidate(
+        title="ChatGPT Export",
+        markdown_body="# ChatGPT Export\n\nDoctor archive locator needle.\n",
+        status="success",
+        quality_score=0.96,
+        provenance=SwallowProvenance(
+            swallow_job_id="doctor_archive",
+            swallow_raw_id="raw_doctor_archive",
+            swallow_document_id="doc_doctor_archive",
+            swallow_version="test",
+            primary_worker="export_archive_worker",
+            worker_version="0.1.0",
+            worker_chain=("export_archive_worker@0.1.0", "quality_checker@0.1.0", "markdown_normalizer@0.1.0"),
+            trace_path="jobs/doctor_archive/trace.jsonl",
+            manifest_path="jobs/doctor_archive/manifest.json",
+            ingest_document_path="jobs/doctor_archive/ingest_document.json",
+            access_context="local_archive",
+        ),
+        artifact_manifest=ArtifactManifest(
+            required=(
+                "jobs/doctor_archive/trace.jsonl",
+                "jobs/doctor_archive/manifest.json",
+                "jobs/doctor_archive/ingest_document.json",
+                conversation_artifact,
+            )
+        ),
+        access_context="local_archive",
+    )
+    logical = ArchiveLogicalDocumentCandidate(
+        logical_source_id="doctor-conversation",
+        title="Doctor Conversation",
+        markdown_body="# Doctor Conversation\n\n## 1. user\n\nDoctor archive locator needle.\n",
+        source_locators=(
+            {
+                "kind": "archive_member",
+                "archive_type": "chatgpt_export",
+                "member_path": "conversations.json",
+                "logical_source_id": "doctor-conversation",
+                "conversation_index": 1,
+                "artifact": conversation_artifact,
+            },
+        ),
+        metadata={"archive_type": "chatgpt_export", "conversation_index": 1, "message_count": 1},
+    )
+    return ArchiveExpansionCandidate(
+        archive_type="chatgpt_export",
+        aggregate_candidate=aggregate,
+        logical_documents=(logical,),
+    )
+
+
 def test_doctor_accepts_indexed_m3_vault(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     source = tmp_path / "note.md"
@@ -50,7 +186,7 @@ def test_doctor_accepts_indexed_m3_vault(tmp_path: Path) -> None:
     assert "revision_content_hash_mismatch" not in _codes(report)
 
 
-def test_doctor_reports_markitdown_available_as_info(tmp_path: Path, monkeypatch) -> None:
+def test_doctor_does_not_report_legacy_markitdown_availability(tmp_path: Path, monkeypatch) -> None:
     vault = tmp_path / "vault"
     init_vault(vault)
     monkeypatch.setattr(doctor_module, "find_spec", lambda name: object() if name == "markitdown" else None)
@@ -58,20 +194,165 @@ def test_doctor_reports_markitdown_available_as_info(tmp_path: Path, monkeypatch
     report = run_doctor(vault)
 
     assert report.exit_code == 0
-    assert _finding(report, "markitdown_available").severity == "info"
+    assert "markitdown_available" not in _codes(report)
+    assert "markitdown_unavailable" not in _codes(report)
     assert "ok" in _codes(report)
 
 
-def test_doctor_reports_markitdown_unavailable_as_non_blocking_info(tmp_path: Path, monkeypatch) -> None:
+def test_doctor_reports_missing_swallow_when_enabled(tmp_path: Path, monkeypatch) -> None:
     vault = tmp_path / "vault"
     init_vault(vault)
+    config = default_config(vault)
+    config = replace(config, features=replace(config.features, swallow_ingest=True))
+    save_config(config, vault / ".indbase" / "config" / "config.toml")
     monkeypatch.setattr(doctor_module, "find_spec", lambda name: None)
 
     report = run_doctor(vault)
 
-    assert report.exit_code == 0
-    assert _finding(report, "markitdown_unavailable").severity == "info"
-    assert "ok" in _codes(report)
+    assert report.exit_code == 2
+    assert _finding(report, "swallow_unavailable").severity == "error"
+
+
+def test_doctor_detects_missing_source_snapshot_and_locator_artifact(tmp_path: Path, monkeypatch) -> None:
+    vault = tmp_path / "vault"
+    init_vault(vault)
+    _enable_swallow(vault, web_ingest=True)
+    monkeypatch.setattr(
+        "indbase_core.swallow_adapter.SwallowIngestAdapter.convert_url",
+        _fake_url_candidate,
+    )
+    run_m3_url_ingest_pipeline(vault, "https://example.com/doctor")
+
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        document = connection.execute("SELECT source_snapshot_path FROM documents").fetchone()
+    finally:
+        connection.close()
+    (vault / document["source_snapshot_path"]).unlink()
+
+    report = run_doctor(vault)
+
+    assert report.exit_code == 2
+    assert "missing_source_snapshot" in _codes(report)
+    assert "missing_source_file_snapshot" in _codes(report)
+    assert "source_locator_missing_artifact" in _codes(report)
+    assert "missing_swallow_required_artifact" in _codes(report)
+
+
+def test_doctor_detects_invalid_chunk_source_locator_json(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    source = tmp_path / "note.md"
+    source.write_text("# Note\nDoctor locator body.\n", encoding="utf-8")
+    init_vault(vault)
+    run_m3_ingest_pipeline(vault, source)
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        connection.execute("UPDATE chunks SET source_locator_json = 'not-json'")
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = run_doctor(vault)
+
+    assert report.exit_code == 2
+    assert "source_locator_invalid" in _codes(report)
+
+
+def test_doctor_detects_non_durable_source_artifact_paths(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    source = tmp_path / "note.md"
+    source.write_text("# Note\nDoctor artifact policy body.\n", encoding="utf-8")
+    init_vault(vault)
+    run_m3_ingest_pipeline(vault, source)
+    cache_artifact = ".indbase/cache/swallow/jobs/job_1/rendered.html"
+    cache_source = ".indbase/cache/swallow/raw_store/original.bin"
+    (vault / cache_artifact).parent.mkdir(parents=True)
+    (vault / cache_artifact).write_text("<html></html>", encoding="utf-8")
+    (vault / cache_source).parent.mkdir(parents=True)
+    (vault / cache_source).write_bytes(b"source")
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        connection.execute(
+            "UPDATE documents SET source_snapshot_path = ?",
+            (cache_artifact,),
+        )
+        connection.execute(
+            "UPDATE source_files SET source_snapshot_path = ?",
+            (cache_artifact,),
+        )
+        connection.execute(
+            "UPDATE chunks SET source_locator_json = ?",
+            (
+                '[{"kind":"web_snapshot","url":"https://example.com","artifact":"'
+                + cache_artifact
+                + '","source_path":"'
+                + cache_source
+                + '"}]',
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = run_doctor(vault)
+
+    assert report.exit_code == 2
+    assert "source_snapshot_not_durable" in _codes(report)
+    assert "source_file_snapshot_not_durable" in _codes(report)
+    assert "source_locator_artifact_not_durable" in _codes(report)
+    assert "source_locator_source_not_durable" in _codes(report)
+
+
+def test_doctor_detects_swallow_trusted_current_missing_revision(tmp_path: Path, monkeypatch) -> None:
+    vault = tmp_path / "vault"
+    init_vault(vault)
+    _enable_swallow(vault, web_ingest=True)
+    monkeypatch.setattr(
+        "indbase_core.swallow_adapter.SwallowIngestAdapter.convert_url",
+        _fake_url_candidate,
+    )
+    run_m3_url_ingest_pipeline(vault, "https://example.com/doctor-revision")
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        connection.execute("UPDATE converter_runs SET revision_id = NULL")
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = run_doctor(vault)
+
+    assert report.exit_code == 2
+    assert "swallow_trusted_current_missing_revision" in _codes(report)
+
+
+def test_doctor_detects_archive_ingest_parent_child_mismatch(tmp_path: Path, monkeypatch) -> None:
+    vault = tmp_path / "vault"
+    archive = tmp_path / "chatgpt-export.zip"
+    archive.write_bytes(b"not used by fake adapter")
+    init_vault(vault)
+    _enable_swallow(vault)
+    monkeypatch.setattr(
+        "indbase_core.swallow_adapter.SwallowIngestAdapter.expand_archive",
+        _fake_archive_expansion,
+    )
+    run_m3_archive_ingest_pipeline(vault, archive)
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        connection.execute(
+            """
+            UPDATE ingest_items
+            SET parent_ingest_item_id = 'ingest_item_missing'
+            WHERE parent_ingest_item_id IS NOT NULL
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = run_doctor(vault)
+
+    assert report.exit_code == 2
+    assert "archive_ingest_child_missing_parent" in _codes(report)
 
 
 def test_doctor_detects_missing_original_and_canonical_markdown(tmp_path: Path) -> None:

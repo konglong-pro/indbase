@@ -109,7 +109,7 @@ def chunk_revision(
     row = connection.execute(
         """
         SELECT dr.revision_id, dr.doc_id, dr.markdown_path, dr.content_hash,
-               d.current_revision_id, d.language
+               d.current_revision_id, d.language, d.quality_signals_json
         FROM document_revisions dr
         JOIN documents d ON d.doc_id = dr.doc_id
         WHERE dr.revision_id = ?
@@ -149,6 +149,7 @@ def chunk_revision(
 
     candidates = chunk_markdown_body(body, options=options)
     now = utc_now_iso()
+    source_locator_json = _source_locator_json(row["quality_signals_json"])
     if is_current:
         connection.execute(
             "UPDATE chunks SET is_current = 0, updated_at = ? WHERE doc_id = ?",
@@ -160,9 +161,9 @@ def chunk_revision(
             INSERT INTO chunks(
               chunk_id, doc_id, revision_id, sequence, heading_path_json,
               text, start_offset, end_offset, source_page, language,
-              token_count, content_hash, is_current, created_at, updated_at
+              token_count, content_hash, is_current, source_locator_json, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 chunk_id_for_revision(revision_id, candidate.sequence),
@@ -177,6 +178,7 @@ def chunk_revision(
                 candidate.token_count,
                 candidate.content_hash,
                 1 if is_current else 0,
+                source_locator_json,
                 now,
                 now,
             ),
@@ -253,6 +255,19 @@ def chunk_id_for_revision(revision_id: str, sequence: int) -> str:
     if sequence < 1:
         raise ValueError("chunk sequence must be >= 1")
     return f"chunk_{revision_id}_{sequence:04d}"
+
+
+def _source_locator_json(quality_signals_json: object) -> str | None:
+    if not quality_signals_json:
+        return None
+    try:
+        payload = json.loads(str(quality_signals_json))
+    except json.JSONDecodeError:
+        return None
+    locators = payload.get("source_locators") if isinstance(payload, dict) else None
+    if not isinstance(locators, list) or not locators:
+        return None
+    return json.dumps(locators, ensure_ascii=False, sort_keys=True)
 
 
 def _parse_markdown_blocks(body: str) -> tuple[_TextBlock, ...]:

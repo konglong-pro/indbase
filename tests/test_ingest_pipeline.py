@@ -355,7 +355,7 @@ def test_m3_ingest_pipeline_pdf_text_ingest_is_searchable(tmp_path: Path, monkey
     assert document["original_path"].endswith("/original.pdf")
     assert document["canonical_path"].endswith("__rev_0001.md")
     assert document["fts_status"] == "indexed"
-    assert converter_run["converter_name"] == "markitdown"
+    assert converter_run["converter_name"] == "swallow"
     assert converter_run["status"] == "succeeded"
     assert revision_count["count"] == 1
     assert chunk_count["count"] == 1
@@ -410,7 +410,7 @@ def test_m3_ingest_pipeline_pdf_empty_output_fails_without_searchable_revision(
     assert document["quality_status"] == "failed"
     assert item["status"] == "failed"
     assert item["error_id"] is not None
-    assert converter_run["converter_name"] == "markitdown"
+    assert converter_run["converter_name"] == "swallow"
     assert converter_run["status"] == "failed"
     assert revision_count["count"] == 0
     assert chunk_count["count"] == 0
@@ -473,7 +473,7 @@ def test_m3_conversion_failure_does_not_create_revision_chunks_or_fts(tmp_path: 
     assert item["status"] == "failed"
     assert item["error_id"] is not None
     assert converter_run["status"] == "failed"
-    assert converter_run["converter_name"] == "markitdown"
+    assert converter_run["converter_name"] == "swallow"
     assert revision_count["count"] == 0
     assert chunk_count["count"] == 0
     assert fts_count["count"] == 0

@@ -14,6 +14,8 @@ def test_vault_layout_is_created(tmp_path: Path) -> None:
     assert paths.outputs_translations.is_dir()
     assert paths.outputs_summaries.is_dir()
     assert paths.originals.is_dir()
+    assert paths.artifacts.is_dir()
+    assert paths.swallow_cache.is_dir()
     assert paths.config_dir.is_dir()
 
 

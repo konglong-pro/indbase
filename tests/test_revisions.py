@@ -81,8 +81,8 @@ def test_write_revision_creates_immutable_source_markdown_and_db_records(tmp_pat
     assert revision["doc_id"] == written.doc_id
     assert revision["sequence"] == 1
     assert revision["markdown_path"] == written.markdown_path
-    assert revision["converter_name"] == "direct_normalizer"
-    assert revision["converter_version"] == "indbase.v0.1"
+    assert revision["converter_name"] == "swallow"
+    assert revision["converter_version"] == "test"
     assert revision["text_length"] == len("# Note\nBody\n")
     assert revision["chunk_count"] == 0
 

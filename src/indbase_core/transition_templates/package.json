@@ -1,0 +1,8 @@
+{
+  "name": "indbase-transition-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "transition": "github:konglong-pro/transition#cf4a726bf9a5c3c9cb300fda38bcb54fac005f23"
+  }
+}

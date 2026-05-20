@@ -9,6 +9,12 @@ from pathlib import Path
 import shutil
 import sqlite3
 
+from indbase_core.artifact_policy import (
+    LOCATOR_ARTIFACT_KEYS,
+    is_relative_vault_path,
+    is_vault_artifact_path,
+    is_vault_original_path,
+)
 from indbase_core.config import ConfigError, load_config
 from indbase_core.conversion import hash_markdown
 from indbase_core.db import connect, load_migrations
@@ -59,6 +65,7 @@ class DoctorReport:
 def run_doctor(vault_path: Path | str) -> DoctorReport:
     paths = vault_paths(vault_path)
     findings: list[DoctorFinding] = []
+    config = None
 
     missing_dirs = [path for path in paths.required_directories() if not path.is_dir()]
     for directory in missing_dirs:
@@ -91,27 +98,16 @@ def run_doctor(vault_path: Path | str) -> DoctorReport:
     else:
         findings.extend(_check_database(paths.root, paths.db_path))
 
-    findings.append(_markitdown_availability_finding())
     findings.append(_ocr_availability_finding())
+    if config is not None and config.features.swallow_ingest:
+        findings.append(_swallow_availability_finding())
+    if config is not None:
+        findings.extend(_check_transition_output_runtime(paths, config))
 
     if not any(finding.severity in {"warning", "error", "critical"} for finding in findings):
         findings.append(DoctorFinding("info", "ok", "Vault health checks passed."))
 
     return DoctorReport(vault_path=paths.root, findings=tuple(findings))
-
-
-def _markitdown_availability_finding() -> DoctorFinding:
-    if find_spec("markitdown") is None:
-        return DoctorFinding(
-            "info",
-            "markitdown_unavailable",
-            "MarkItDown is not installed; HTML fallback remains available and Tier 2 conversion will create visible review items.",
-        )
-    return DoctorFinding(
-        "info",
-        "markitdown_available",
-        "MarkItDown is installed; HTML and Tier 2 best-effort conversion can use it.",
-    )
 
 
 def _ocr_availability_finding() -> DoctorFinding:
@@ -125,6 +121,20 @@ def _ocr_availability_finding() -> DoctorFinding:
         "info",
         "ocr_tesseract_available",
         "Tesseract OCR is installed; future OCR adapters can use it when page rendering is enabled.",
+    )
+
+
+def _swallow_availability_finding() -> DoctorFinding:
+    if find_spec("swallow") is None:
+        return DoctorFinding(
+            "error",
+            "swallow_unavailable",
+            "swallow ingest is enabled but the swallow package is not installed.",
+        )
+    return DoctorFinding(
+        "info",
+        "swallow_available",
+        "swallow ingest is enabled and the swallow package is importable.",
     )
 
 
@@ -172,10 +182,16 @@ def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
             findings.extend(_check_source_shell_integrity(connection))
             findings.extend(_check_chunk_integrity(connection))
             findings.extend(_check_fts_integrity(connection))
+            findings.extend(_check_source_snapshot_integrity(connection, vault_root))
+            findings.extend(_check_chunk_source_locator_integrity(connection, vault_root))
             findings.extend(_check_ocr_integrity(connection))
             findings.extend(_check_embedding_integrity(connection))
             findings.extend(_check_translation_integrity(connection, vault_root))
             findings.extend(_check_candidate_card_integrity(connection, vault_root))
+            findings.extend(_check_swallow_conversion_integrity(connection, vault_root))
+            findings.extend(_check_archive_ingest_integrity(connection))
+            findings.extend(_check_swallow_artifact_integrity(connection, vault_root))
+            findings.extend(_check_output_run_integrity(connection, vault_root))
             findings.extend(_check_review_queue(connection))
         finally:
             connection.close()
@@ -694,6 +710,227 @@ def _check_fts_metadata_integrity(connection: sqlite3.Connection) -> list[Doctor
     return findings
 
 
+def _check_source_snapshot_integrity(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    document_rows = connection.execute(
+        """
+        SELECT doc_id, source_snapshot_path
+        FROM documents
+        WHERE source_snapshot_path IS NOT NULL
+          AND deleted_at IS NULL
+        ORDER BY created_at, doc_id
+        """
+    ).fetchall()
+    for row in document_rows:
+        snapshot_path = str(row["source_snapshot_path"] or "")
+        if snapshot_path and not is_vault_artifact_path(snapshot_path):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "source_snapshot_not_durable",
+                    f"Document {row['doc_id']} source_snapshot_path is not a durable artifact path: {snapshot_path}",
+                )
+            )
+        elif snapshot_path and not (vault_root / snapshot_path).is_file():
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "missing_source_snapshot",
+                    f"Document {row['doc_id']} source_snapshot_path is missing: {snapshot_path}",
+                )
+            )
+
+    source_file_rows = connection.execute(
+        """
+        SELECT source_file_id, doc_id, source_snapshot_path
+        FROM source_files
+        WHERE source_snapshot_path IS NOT NULL
+          AND deleted_at IS NULL
+        ORDER BY created_at, source_file_id
+        """
+    ).fetchall()
+    for row in source_file_rows:
+        snapshot_path = str(row["source_snapshot_path"] or "")
+        if snapshot_path and not is_vault_artifact_path(snapshot_path):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "source_file_snapshot_not_durable",
+                    f"Source file {row['source_file_id']} snapshot is not a durable artifact path: {snapshot_path}",
+                )
+            )
+        elif snapshot_path and not (vault_root / snapshot_path).is_file():
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "missing_source_file_snapshot",
+                    f"Source file {row['source_file_id']} for document {row['doc_id']} snapshot is missing: {snapshot_path}",
+                )
+            )
+    return findings
+
+
+def _check_chunk_source_locator_integrity(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    rows = connection.execute(
+        """
+        SELECT c.chunk_id, c.doc_id, c.revision_id, c.source_locator_json
+        FROM chunks c
+        JOIN documents d ON d.doc_id = c.doc_id
+        WHERE c.source_locator_json IS NOT NULL
+          AND c.deleted_at IS NULL
+          AND d.deleted_at IS NULL
+        ORDER BY c.created_at, c.chunk_id
+        """
+    ).fetchall()
+    for row in rows:
+        chunk_id = str(row["chunk_id"])
+        locators = _parse_locator_list(row["source_locator_json"])
+        if locators is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "source_locator_invalid",
+                    f"Chunk {chunk_id} source_locator_json is not a valid locator list.",
+                )
+            )
+            continue
+        if not locators:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "source_locator_empty",
+                    f"Chunk {chunk_id} source_locator_json is empty.",
+                )
+            )
+            continue
+        for locator in locators:
+            kind = str(locator.get("kind") or "")
+            if not kind:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "source_locator_missing_kind",
+                        f"Chunk {chunk_id} has a source locator without kind.",
+                    )
+                )
+            findings.extend(_check_locator_paths(chunk_id, locator, vault_root))
+            if kind == "archive_member":
+                findings.extend(_check_archive_member_locator(chunk_id, locator))
+            elif kind == "web_snapshot":
+                findings.extend(_check_web_snapshot_locator(chunk_id, locator))
+            elif kind in {"ocr", "ocr_page", "asr_transcript", "asr_segment"}:
+                findings.extend(_check_media_locator(chunk_id, locator))
+    return findings
+
+
+def _parse_locator_list(value: object) -> list[dict[str, object]] | None:
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, list):
+        return None
+    locators: list[dict[str, object]] = []
+    for locator in parsed:
+        if not isinstance(locator, dict):
+            return None
+        locators.append(locator)
+    return locators
+
+
+def _check_locator_paths(chunk_id: str, locator: dict[str, object], vault_root: Path) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    for key in LOCATOR_ARTIFACT_KEYS:
+        value = locator.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        if not is_vault_artifact_path(value):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "source_locator_artifact_not_durable",
+                    f"Chunk {chunk_id} locator {key} is not a durable artifact path: {value}",
+                )
+            )
+        elif not (vault_root / value).is_file():
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "source_locator_missing_artifact",
+                    f"Chunk {chunk_id} locator {key} is missing: {value}",
+                )
+            )
+    source_path = locator.get("source_path")
+    if isinstance(source_path, str) and source_path and not is_vault_original_path(source_path):
+        findings.append(
+            DoctorFinding(
+                "error",
+                "source_locator_source_not_durable",
+                f"Chunk {chunk_id} locator source_path is not a durable original path: {source_path}",
+            )
+        )
+    elif isinstance(source_path, str) and source_path and not (vault_root / source_path).is_file():
+        findings.append(
+            DoctorFinding(
+                "error",
+                "source_locator_missing_source",
+                f"Chunk {chunk_id} locator source_path is missing: {source_path}",
+            )
+        )
+    return findings
+
+
+def _check_archive_member_locator(chunk_id: str, locator: dict[str, object]) -> list[DoctorFinding]:
+    required = ("archive_type", "member_path", "logical_source_id", "conversation_index", "source_path", "artifact")
+    missing = _missing_locator_keys(locator, required)
+    if not missing:
+        return []
+    return [
+        DoctorFinding(
+            "error",
+            "archive_member_locator_incomplete",
+            f"Chunk {chunk_id} archive_member locator is missing: {', '.join(missing)}.",
+        )
+    ]
+
+
+def _check_web_snapshot_locator(chunk_id: str, locator: dict[str, object]) -> list[DoctorFinding]:
+    missing = _missing_locator_keys(locator, ("url", "artifact"))
+    if not missing:
+        return []
+    return [
+        DoctorFinding(
+            "error",
+            "web_snapshot_locator_incomplete",
+            f"Chunk {chunk_id} web_snapshot locator is missing: {', '.join(missing)}.",
+        )
+    ]
+
+
+def _check_media_locator(chunk_id: str, locator: dict[str, object]) -> list[DoctorFinding]:
+    if not _missing_locator_keys(locator, ("artifact", "source_path")):
+        return []
+    return [
+        DoctorFinding(
+            "error",
+            "media_locator_incomplete",
+            f"Chunk {chunk_id} OCR/ASR locator must include artifact and source_path.",
+        )
+    ]
+
+
+def _missing_locator_keys(locator: dict[str, object], keys: tuple[str, ...]) -> list[str]:
+    missing: list[str] = []
+    for key in keys:
+        value = locator.get(key)
+        if value is None:
+            missing.append(key)
+        elif isinstance(value, str) and not value:
+            missing.append(key)
+    return missing
+
+
 def _document_tags_text(connection: sqlite3.Connection, doc_id: str) -> str:
     rows = connection.execute(
         """
@@ -831,7 +1068,7 @@ def _check_ocr_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
         SELECT cr.converter_run_id, cr.doc_id
         FROM converter_runs cr
         WHERE cr.status = 'failed'
-          AND cr.converter_name = 'markitdown'
+          AND cr.converter_name IN ('swallow', 'swallow_required_gate', 'markitdown')
           AND NOT EXISTS (
             SELECT 1
             FROM review_items ri
@@ -855,7 +1092,7 @@ def _check_ocr_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
         SELECT cr.converter_run_id, cr.doc_id
         FROM converter_runs cr
         WHERE cr.status = 'failed'
-          AND cr.converter_name = 'markitdown'
+          AND cr.converter_name IN ('swallow', 'swallow_required_gate', 'markitdown')
           AND NOT EXISTS (
             SELECT 1
             FROM errors e
@@ -1554,6 +1791,471 @@ def _check_review_queue(connection: sqlite3.Connection) -> list[DoctorFinding]:
             f"Review queue has {count} pending item(s).",
         )
     ]
+
+
+def _check_swallow_conversion_integrity(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    rows = connection.execute(
+        """
+        SELECT cr.converter_run_id, cr.doc_id, cr.revision_id, cr.status,
+               cr.promotion_status, cr.candidate_path, cr.external_trace_path,
+               cr.primary_worker, cr.artifact_manifest_json, d.current_revision_id
+        FROM converter_runs cr
+        LEFT JOIN documents d ON d.doc_id = cr.doc_id
+        WHERE cr.converter_name = 'swallow'
+        ORDER BY cr.created_at, cr.converter_run_id
+        """
+    ).fetchall()
+    for row in rows:
+        converter_run_id = str(row["converter_run_id"])
+        status = str(row["status"] or "")
+        promotion_status = str(row["promotion_status"] or "")
+        if promotion_status == "trusted-current":
+            if status != "succeeded":
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_promotion_status_mismatch",
+                        f"Swallow converter run {converter_run_id} is trusted-current but status is {status}.",
+                    )
+                )
+            if not row["revision_id"]:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_trusted_current_missing_revision",
+                        f"Swallow converter run {converter_run_id} is trusted-current but has no revision_id.",
+                    )
+                )
+            if not row["external_trace_path"]:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_trace_missing",
+                        f"Swallow converter run {converter_run_id} is trusted-current but has no external_trace_path.",
+                    )
+                )
+            if not row["primary_worker"]:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_primary_worker_missing",
+                        f"Swallow converter run {converter_run_id} is trusted-current but has no primary_worker.",
+                    )
+                )
+        if status == "pending_review":
+            candidate_path = str(row["candidate_path"] or "")
+            if not candidate_path or not (vault_root / candidate_path).is_file():
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_pending_candidate_missing",
+                        f"Pending swallow converter run {converter_run_id} has no readable candidate_path.",
+                    )
+                )
+        if row["revision_id"] and row["doc_id"]:
+            revision = connection.execute(
+                """
+                SELECT doc_id
+                FROM document_revisions
+                WHERE revision_id = ?
+                """,
+                (row["revision_id"],),
+            ).fetchone()
+            if revision is None:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_revision_missing",
+                        f"Swallow converter run {converter_run_id} references missing revision {row['revision_id']}.",
+                    )
+                )
+            elif revision["doc_id"] != row["doc_id"]:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_revision_doc_mismatch",
+                        f"Swallow converter run {converter_run_id} revision belongs to a different document.",
+                    )
+                )
+        findings.extend(_check_swallow_required_artifacts_archived(converter_run_id, row))
+    return findings
+
+
+def _check_swallow_required_artifacts_archived(converter_run_id: str, row: sqlite3.Row) -> list[DoctorFinding]:
+    if not row["artifact_manifest_json"]:
+        return []
+    try:
+        manifest = json.loads(str(row["artifact_manifest_json"]))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(manifest, dict):
+        return []
+    required = manifest.get("required", [])
+    archived_required = manifest.get("archived_required", [])
+    if not isinstance(required, list) or not isinstance(archived_required, list):
+        return []
+    if (
+        row["promotion_status"] == "trusted-current"
+        and required
+        and len(archived_required) < len(required)
+    ):
+        return [
+            DoctorFinding(
+                "error",
+                "swallow_required_artifacts_not_archived",
+                f"Swallow converter run {converter_run_id} is trusted-current but did not archive every required artifact.",
+            )
+        ]
+    return []
+
+
+def _check_archive_ingest_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    runs = connection.execute(
+        """
+        SELECT ingest_id
+        FROM ingest_runs
+        WHERE source_kind = 'archive'
+        ORDER BY created_at, ingest_id
+        """
+    ).fetchall()
+    for run in runs:
+        ingest_id = str(run["ingest_id"])
+        parents = connection.execute(
+            """
+            SELECT ingest_item_id, logical_source_id
+            FROM ingest_items
+            WHERE ingest_id = ?
+              AND parent_ingest_item_id IS NULL
+              AND doc_id IS NULL
+            ORDER BY created_at, ingest_item_id
+            """,
+            (ingest_id,),
+        ).fetchall()
+        if len(parents) != 1:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "archive_ingest_parent_invalid",
+                    f"Archive ingest {ingest_id} should have exactly one parent package item; found {len(parents)}.",
+                )
+            )
+            parent_id = None
+        else:
+            parent_id = str(parents[0]["ingest_item_id"])
+            logical_source_id = str(parents[0]["logical_source_id"] or "")
+            if not logical_source_id.startswith("archive:"):
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "archive_ingest_parent_logical_id_invalid",
+                        f"Archive ingest parent {parent_id} has invalid logical_source_id: {logical_source_id}",
+                    )
+                )
+
+        children = connection.execute(
+            """
+            SELECT ii.ingest_item_id, ii.doc_id, ii.parent_ingest_item_id,
+                   ii.logical_source_id, ii.status, d.source_type, d.current_revision_id
+            FROM ingest_items ii
+            LEFT JOIN documents d ON d.doc_id = ii.doc_id
+            WHERE ii.ingest_id = ?
+              AND ii.parent_ingest_item_id IS NOT NULL
+            ORDER BY ii.created_at, ii.ingest_item_id
+            """,
+            (ingest_id,),
+        ).fetchall()
+        if not children:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "archive_ingest_children_missing",
+                    f"Archive ingest {ingest_id} has no logical child items.",
+                )
+            )
+        for child in children:
+            child_id = str(child["ingest_item_id"])
+            if parent_id is not None and child["parent_ingest_item_id"] != parent_id:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "archive_ingest_child_missing_parent",
+                        f"Archive child item {child_id} does not point at the archive parent item.",
+                    )
+                )
+            if not child["doc_id"]:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "archive_ingest_child_missing_document",
+                        f"Archive child item {child_id} has no document.",
+                    )
+                )
+                continue
+            if child["source_type"] != "chatgpt_conversation":
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "archive_ingest_child_source_type_mismatch",
+                        f"Archive child item {child_id} document source_type is {child['source_type']}.",
+                    )
+                )
+            if child["status"] == "succeeded" and not child["current_revision_id"]:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "archive_ingest_child_missing_revision",
+                        f"Archive child item {child_id} succeeded without a current revision.",
+                    )
+                )
+            if child["status"] == "succeeded":
+                findings.extend(_check_archive_child_current_locators(connection, child))
+    return findings
+
+
+def _check_archive_child_current_locators(
+    connection: sqlite3.Connection,
+    child: sqlite3.Row,
+) -> list[DoctorFinding]:
+    rows = connection.execute(
+        """
+        SELECT chunk_id, source_locator_json
+        FROM chunks
+        WHERE doc_id = ?
+          AND revision_id = ?
+          AND is_current = 1
+          AND deleted_at IS NULL
+        ORDER BY sequence, chunk_id
+        """,
+        (child["doc_id"], child["current_revision_id"]),
+    ).fetchall()
+    findings: list[DoctorFinding] = []
+    expected_logical_source_id = str(child["logical_source_id"] or "")
+    for row in rows:
+        locators = _parse_locator_list(row["source_locator_json"])
+        if not locators:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "archive_member_locator_missing",
+                    f"Archive child chunk {row['chunk_id']} has no archive_member locator.",
+                )
+            )
+            continue
+        matching = [
+            locator
+            for locator in locators
+            if locator.get("kind") == "archive_member"
+            and str(locator.get("logical_source_id") or "") == expected_logical_source_id
+        ]
+        if not matching:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "archive_member_locator_mismatch",
+                    f"Archive child chunk {row['chunk_id']} has no locator for logical source {expected_logical_source_id}.",
+                )
+            )
+    return findings
+
+
+def _check_swallow_artifact_integrity(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    rows = connection.execute(
+        """
+        SELECT converter_run_id, artifact_manifest_json, promotion_status, status
+        FROM converter_runs
+        WHERE converter_name = 'swallow'
+          AND artifact_manifest_json IS NOT NULL
+        ORDER BY created_at, converter_run_id
+        """
+    ).fetchall()
+    for row in rows:
+        converter_run_id = str(row["converter_run_id"])
+        try:
+            manifest = json.loads(str(row["artifact_manifest_json"]))
+        except json.JSONDecodeError:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "swallow_artifact_manifest_invalid",
+                    f"Swallow converter run {converter_run_id} has invalid artifact_manifest_json.",
+                )
+            )
+            continue
+        if not isinstance(manifest, dict):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "swallow_artifact_manifest_invalid",
+                    f"Swallow converter run {converter_run_id} artifact manifest is not an object.",
+                )
+            )
+            continue
+        archived_required = manifest.get("archived_required", [])
+        if not isinstance(archived_required, list):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "swallow_artifact_manifest_invalid",
+                    f"Swallow converter run {converter_run_id} archived_required is not a list.",
+                )
+            )
+            continue
+        for artifact in archived_required:
+            artifact_path = str(artifact)
+            if artifact_path and not is_vault_artifact_path(artifact_path):
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "swallow_required_artifact_not_durable",
+                        f"Swallow converter run {converter_run_id} required artifact is not durable: {artifact_path}",
+                    )
+                )
+            elif artifact_path and not (vault_root / artifact_path).is_file():
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "missing_swallow_required_artifact",
+                        f"Swallow converter run {converter_run_id} required artifact is missing: {artifact_path}",
+                    )
+                )
+    return findings
+
+
+def _check_transition_output_runtime(paths, config) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    if not config.features.transition_output:
+        return findings
+    runtime_dir = paths.transition_runtime
+    bridge = runtime_dir / "transition-bridge.mjs"
+    transition_config = runtime_dir / "transition.config.json"
+    node_modules = runtime_dir / "node_modules"
+    if not bridge.is_file() or not transition_config.is_file() or not node_modules.is_dir():
+        findings.append(
+            DoctorFinding(
+                "error",
+                "transition_runtime_missing",
+                "transition_output is enabled but the per-vault runtime is incomplete. "
+                "Run `indb output runtime install`.",
+            )
+        )
+    return findings
+
+
+def _check_output_run_integrity(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    try:
+        connection.execute("SELECT 1 FROM output_runs LIMIT 1")
+    except sqlite3.OperationalError:
+        return findings
+
+    never_promoted_current = connection.execute(
+        """
+        SELECT dr.revision_id, dr.doc_id
+        FROM document_revisions dr
+        JOIN documents d ON d.doc_id = dr.doc_id
+        WHERE dr.promotion_status = 'never_promoted'
+          AND d.current_revision_id = dr.revision_id
+          AND dr.deleted_at IS NULL
+        """
+    ).fetchall()
+    for row in never_promoted_current:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "never_promoted_is_current",
+                f"Document {row['doc_id']} current revision {row['revision_id']} is never_promoted.",
+            )
+        )
+
+    rows = connection.execute(
+        """
+        SELECT output_run_id, status, evidence_manifest_path
+        FROM output_runs
+        WHERE deleted_at IS NULL
+          AND mode = 'export'
+          AND status IN ('succeeded', 'partial')
+        ORDER BY created_at, output_run_id
+        """
+    ).fetchall()
+    for row in rows:
+        run_id = str(row["output_run_id"])
+        if not row["evidence_manifest_path"]:
+            findings.append(
+                DoctorFinding(
+                    "warning",
+                    "output_run_missing_evidence",
+                    f"Output run {run_id} has no evidence_manifest_path.",
+                )
+            )
+        md_artifact = connection.execute(
+            """
+            SELECT path, sha256, status
+            FROM output_artifacts
+            WHERE output_run_id = ?
+              AND format = 'md'
+              AND deleted_at IS NULL
+            """,
+            (run_id,),
+        ).fetchone()
+        if md_artifact is None or md_artifact["status"] != "succeeded":
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "output_run_missing_normalized_md",
+                    f"Output run {run_id} is missing a succeeded normalized.md artifact.",
+                )
+            )
+            continue
+        rel_path = str(md_artifact["path"] or "")
+        if not rel_path.startswith("outputs/exports/"):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "output_artifact_outside_exports",
+                    f"Output run {run_id} normalized.md is outside outputs/exports: {rel_path}",
+                )
+            )
+        if not is_relative_vault_path(rel_path):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "output_artifact_unsafe_path",
+                    f"Output run {run_id} artifact path is not vault-relative safe: {rel_path}",
+                )
+            )
+        file_path = vault_root / rel_path
+        if not file_path.is_file():
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "missing_output_artifact_file",
+                    f"Output run {run_id} artifact file is missing: {rel_path}",
+                )
+            )
+        elif md_artifact["sha256"]:
+            actual = hash_markdown(file_path.read_text(encoding="utf-8"))
+            if actual != md_artifact["sha256"]:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "output_artifact_hash_mismatch",
+                        f"Output run {run_id} normalized.md hash does not match the database.",
+                    )
+                )
+        if row["evidence_manifest_path"]:
+            manifest_path = vault_root / str(row["evidence_manifest_path"])
+            if not manifest_path.is_file():
+                findings.append(
+                    DoctorFinding(
+                        "warning",
+                        "missing_output_evidence_manifest",
+                        f"Output run {run_id} evidence manifest is missing on disk.",
+                    )
+                )
+    return findings
 
 
 def _split_frontmatter(markdown: str) -> tuple[dict[str, object] | None, str]:

@@ -82,6 +82,38 @@ def write_revisions_for_converted_sources(
     )
 
 
+def write_revision_for_converter_run(
+    connection: sqlite3.Connection,
+    vault_path: Path | str,
+    converter_run_id: str,
+) -> WrittenRevision:
+    row = connection.execute(
+        """
+        SELECT ii.ingest_item_id, ii.doc_id, d.title, d.original_title, d.filename_slug,
+               d.status, d.source_type, d.source_uri, d.normalized_source_uri,
+               d.source_hash, d.original_path, d.language, d.category_id,
+               d.quality_status, d.quality_signals_json, d.needs_review,
+               cr.converter_run_id, cr.converter_name, cr.converter_version,
+               cr.output_hash, cr.quality_signals_json AS converter_quality_signals_json
+        FROM converter_runs cr
+        JOIN documents d ON d.doc_id = cr.doc_id
+        JOIN ingest_items ii ON ii.doc_id = d.doc_id
+        WHERE cr.converter_run_id = ?
+          AND cr.revision_id IS NULL
+          AND cr.status = 'pending_review'
+          AND ii.status = 'pending_review'
+        ORDER BY ii.updated_at DESC, ii.created_at DESC
+        LIMIT 1
+        """,
+        (converter_run_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Pending conversion candidate not found: {converter_run_id}")
+    written = _write_one_revision(connection, vault_path, row)
+    connection.commit()
+    return written
+
+
 def _write_one_revision(
     connection: sqlite3.Connection,
     vault_root: Path,

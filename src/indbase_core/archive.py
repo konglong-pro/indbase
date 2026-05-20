@@ -9,6 +9,7 @@ import sqlite3
 
 from indbase_core.errors import record_error
 from indbase_core.ids import new_doc_id, new_prefixed_id
+from indbase_core.config import IngestConfig
 from indbase_core.paths import VaultPaths, slugify, vault_paths
 from indbase_core.source_inspector import SourceInspection, inspect_source
 from indbase_core.time import utc_now_iso
@@ -33,6 +34,8 @@ def archive_pending_sources(
     connection: sqlite3.Connection,
     vault_path: Path | str,
     ingest_id: str,
+    *,
+    ingest_config: IngestConfig | None = None,
 ) -> ArchiveResult:
     paths = vault_paths(vault_path)
     rows = connection.execute(
@@ -52,6 +55,7 @@ def archive_pending_sources(
             inspection = inspect_source(
                 row["normalized_source_uri"],
                 source_uri=row["source_uri"],
+                ingest_config=ingest_config,
             )
             if not inspection.is_supported:
                 continue
