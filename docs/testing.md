@@ -19,6 +19,7 @@ uv run python scripts/doctor_negative_gate.py
 # v0.3.1 taxonomy N1 gates (layer C2)
 uv run python scripts/v031_taxonomy_release_gate.py
 uv run python scripts/v031_acceptance_e2e.py
+uv run python scripts/v032_retrieval_release_gate.py
 
 # v0.3.1 taxonomy dogfood (layer E; repo-local by default)
 uv run python scripts/v031_real_corpus_dogfood_gate.py
@@ -39,6 +40,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | A/B — pytest + compileall | A, B | `uv run python -m pytest`, `compileall` |
 | C — v0.2 deterministic vault + doctor negative | C | deterministic + doctor negative scripts |
 | C2 — v0.3.1 taxonomy N1 gates | C2 | `scripts/v031_taxonomy_release_gate.py` (n1–n6) + `scripts/v031_acceptance_e2e.py` |
+| C3 — v0.3.2 retrieval release gate | C3 | `scripts/v032_retrieval_release_gate.py` |
 | D — real swallow smoke | D | `INDBASE_SWALLOW_SMOKE=1`, `uv sync --extra swallow` |
 | D — real Node transition smoke | D | `INDBASE_TRANSITION_SMOKE=1`, Node 20 |
 
@@ -124,8 +126,15 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v02_release_gate.py` | A–E aggregate | All required layers; D/E per env |
 | `v031_taxonomy_release_gate.py` | C2 | Schema/doctor, profile/features, tag candidates, category manager, janitor audit, fake LLM harness (n1–n6) |
 | `v031_real_corpus_dogfood_gate.py` | E (v0.3.1) | Repo-local or `INDB_REAL_CORPUS`: ingest → profiles → taxonomy analyze/suggest → janitor → doctor hard = 0 |
+| `v032_retrieval_release_gate.py` | C3 | Deterministic retrieve packages, explicit filters, per-doc limit, no citations/search_results writes |
 
 Shared helpers: `scripts/gate_common.py`, `scripts/taxonomy_gate_common.py`.
+
+### v0.3.2 retrieval tests
+
+| Tests | What they prove |
+| --- | --- |
+| `test_retrieval.py` | Parser/filters, persistence, exact quotes, tag hard filter, per-doc limit, archive exclusion, CLI retrieve/list/show |
 
 ### v0.3.1 taxonomy tests
 

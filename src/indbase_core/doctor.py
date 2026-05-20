@@ -195,6 +195,7 @@ def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
             findings.extend(_check_output_run_integrity(connection, vault_root))
             findings.extend(_check_review_queue(connection))
             findings.extend(_check_taxonomy_integrity(connection))
+            findings.extend(_check_retrieval_integrity(connection))
         finally:
             connection.close()
     except sqlite3.Error as exc:
@@ -2604,6 +2605,168 @@ def _check_taxonomy_integrity(connection: sqlite3.Connection) -> list[DoctorFind
             )
         )
 
+    return findings
+
+
+def _retrieval_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'retrieval_runs'
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _check_retrieval_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _retrieval_schema_ready(connection):
+        return []
+
+    findings: list[DoctorFinding] = []
+    runs = connection.execute(
+        """
+        SELECT retrieval_run_id, filters_json, planner_json, warnings_json,
+               result_count, status
+        FROM retrieval_runs
+        ORDER BY created_at DESC
+        LIMIT 200
+        """
+    ).fetchall()
+    for row in runs:
+        run_id = str(row["retrieval_run_id"])
+        for field, code in (
+            ("filters_json", "retrieval_run_invalid_json"),
+            ("planner_json", "retrieval_run_invalid_json"),
+            ("warnings_json", "retrieval_run_invalid_json"),
+        ):
+            raw = row[field]
+            try:
+                json.loads(str(raw or "{}"))
+            except json.JSONDecodeError:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        code,
+                        f"Retrieval run {run_id} has invalid {field}.",
+                    )
+                )
+        item_count = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM retrieval_items
+            WHERE retrieval_run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()["count"]
+        expected = int(row["result_count"] or 0)
+        if int(item_count) != expected:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_run_count_mismatch",
+                    f"Retrieval run {run_id} result_count={expected} but items={item_count}.",
+                )
+            )
+
+    items = connection.execute(
+        """
+        SELECT ri.retrieval_item_id, ri.retrieval_run_id, ri.rank, ri.doc_id,
+               ri.revision_id, ri.chunk_id, ri.quote,
+               rr.retrieval_run_id AS run_exists
+        FROM retrieval_items ri
+        LEFT JOIN retrieval_runs rr ON rr.retrieval_run_id = ri.retrieval_run_id
+        ORDER BY ri.created_at DESC
+        LIMIT 500
+        """
+    ).fetchall()
+    seen_ranks: dict[str, set[int]] = {}
+    for row in items:
+        item_id = str(row["retrieval_item_id"])
+        run_id = str(row["retrieval_run_id"])
+        if row["run_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_run",
+                    f"Retrieval item {item_id} references missing run {run_id}.",
+                )
+            )
+        rank = int(row["rank"])
+        seen_ranks.setdefault(run_id, set())
+        if rank in seen_ranks[run_id]:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_invalid_rank",
+                    f"Retrieval run {run_id} has duplicate rank {rank}.",
+                )
+            )
+        seen_ranks[run_id].add(rank)
+
+        doc = connection.execute(
+            "SELECT doc_id FROM documents WHERE doc_id = ?",
+            (row["doc_id"],),
+        ).fetchone()
+        if doc is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_doc",
+                    f"Retrieval item {item_id} references missing document {row['doc_id']}.",
+                )
+            )
+        revision = connection.execute(
+            "SELECT revision_id FROM document_revisions WHERE revision_id = ?",
+            (row["revision_id"],),
+        ).fetchone()
+        if revision is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_revision",
+                    f"Retrieval item {item_id} references missing revision {row['revision_id']}.",
+                )
+            )
+        chunk = connection.execute(
+            "SELECT chunk_id, revision_id, text FROM chunks WHERE chunk_id = ?",
+            (row["chunk_id"],),
+        ).fetchone()
+        if chunk is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_chunk",
+                    f"Retrieval item {item_id} references missing chunk {row['chunk_id']}.",
+                )
+            )
+            continue
+        if str(chunk["revision_id"]) != str(row["revision_id"]):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_wrong_revision",
+                    f"Retrieval item {item_id} revision does not match chunk revision.",
+                )
+            )
+        quote = str(row["quote"] or "")
+        if not quote.strip():
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_quote_missing",
+                    f"Retrieval item {item_id} has an empty quote.",
+                )
+            )
+        elif quote.strip() not in str(chunk["text"]):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_quote_not_in_chunk",
+                    f"Retrieval item {item_id} quote is not an exact substring of chunk text.",
+                )
+            )
     return findings
 
 

@@ -17,6 +17,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0006_swallow_ingest_integration",
         "0007_transition_output_integration",
         "0008_taxonomy_foundation",
+        "0009_retrieval_intelligence",
     ]
 
     connection = connect(db_path)
@@ -51,6 +52,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0006_swallow_ingest_integration",
             "0007_transition_output_integration",
             "0008_taxonomy_foundation",
+        "0009_retrieval_intelligence",
         ]
         assert "document_profiles" in tables
         assert "feature_atoms" in tables

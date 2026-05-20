@@ -15,6 +15,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.2 swallow-backed ingest** | **Active expansion — implemented** in core/CLI; production conversion requires `features.swallow_ingest=true` |
 | **v0.2 transition-backed output** | **Active expansion — implemented** in core/CLI; requires explicit `indb output runtime install` |
 | **v0.3.1 taxonomy foundation** | **Implemented** — typed tags, profiles, taxonomy suggestions, fake LLM harness; see `docs/planning/v0.3.1-taxonomy-foundation.md` |
+| **v0.3.2 retrieval intelligence foundation** | **Implemented** — `indb retrieve`, persisted retrieval packages, taxonomy-aware boosts; see `docs/planning/v0.3.2-retrieval-intelligence-foundation.md` |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -30,6 +31,8 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.1 product spec | `docs/planning/mvp-v0.1-spec.md` |
 | v0.2 swallow spec | `docs/planning/v0.2-swallow-ingest-integration.md` |
 | v0.2 transition spec | `docs/planning/v0.2-transition-output-integration.md` |
+| v0.3.1 taxonomy spec | `docs/planning/v0.3.1-taxonomy-foundation.md` |
+| v0.3.2 retrieval spec | `docs/planning/v0.3.2-retrieval-intelligence-foundation.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -124,6 +127,33 @@ indb doc normalize <doc_id> --replace-current
 
 `features.transition_output=true` only after successful `output runtime install`.
 
+## v0.3.2 retrieval intelligence foundation (implemented)
+
+**Spec:** `docs/planning/v0.3.2-retrieval-intelligence-foundation.md`  
+**Agent guide:** `docs/agents/v0.3.2-retrieval-intelligence-foundation/AGENT.md`  
+**Migration:** `0009_retrieval_intelligence.sql`
+
+### Product rules in force
+
+- **`indb retrieve`** builds citation-ready, persisted retrieval packages (`retrieval_runs`, `retrieval_items`).
+- Default base mode **hybrid**; default **per_doc_limit = 3**; does not auto-build profiles.
+- Explicit `tag:` / `category:` filters are hard filters; natural-language taxonomy matches are soft boosts only.
+- Pending taxonomy suggestions and tag candidates do not affect retrieval.
+- Does **not** write `citations`, `search_results`, source revisions, chunks, or taxonomy mutations.
+- **`indb search`** behavior unchanged.
+
+### Core modules
+
+- `retrieval.py` — parser, filter resolver, hybrid candidate generation, boosts, quote extraction, persistence
+
+### CLI surface
+
+```text
+indb retrieve <query> [--mode fts|vector|hybrid] [--top-k N] [--candidate-k N] [--per-doc-limit N]
+indb retrieval list
+indb retrieval show <retrieval_run_id>
+```
+
 ## Release gates and CI (current)
 
 **Canonical gate doc:** `docs/planning/v0.2-release-gate-checkpoint.md`
@@ -134,6 +164,7 @@ indb doc normalize <doc_id> --replace-current
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
 | C2 | `v031_taxonomy_release_gate.py` (N1 taxonomy gates) | Yes |
+| C3 | `v032_retrieval_release_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |
 | E | Real-corpus dogfood | No (manual/scheduled workflow) |
 

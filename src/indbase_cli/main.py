@@ -61,6 +61,12 @@ from indbase_core.ingest import (
 from indbase_core.indexer import rebuild_fts_index
 from indbase_core.ocr import list_ocr_pages, run_ocr_for_document
 from indbase_core.reviews import get_review_item, list_review_items, resolve_review_item, resolve_review_items
+from indbase_core.retrieval import (
+    get_retrieval_run,
+    list_retrieval_items,
+    list_retrieval_runs,
+    retrieve_chunks,
+)
 from indbase_core.search import SearchOptions, search_chunks
 from indbase_core.tags import (
     add_document_tag,
@@ -180,6 +186,7 @@ output_runtime_app = typer.Typer(help="Manage per-vault transition runtime.", no
 output_export_app = typer.Typer(help="Read-only output export.", no_args_is_help=True)
 profile_app = typer.Typer(help="Build and inspect document profiles.", no_args_is_help=True)
 taxonomy_app = typer.Typer(help="Taxonomy analysis and governance.", no_args_is_help=True)
+retrieval_app = typer.Typer(help="Inspect persisted retrieval packages.", no_args_is_help=True)
 console = Console()
 
 
@@ -460,6 +467,178 @@ def search(
         console.print(f"chunk_id: {row.chunk_id}")
         console.print(f"source_path: {row.source_path or ''}")
         console.print(f"snippet: {row.snippet}")
+
+
+@app.command("retrieve")
+def retrieve(
+    query: str = typer.Argument(..., help="Query text for citation-ready retrieval package."),
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    top_k: int | None = typer.Option(None, "--top-k", min=1, help="Maximum package items."),
+    candidate_k: int | None = typer.Option(None, "--candidate-k", min=1, help="Search candidate pool size."),
+    mode: str = typer.Option("hybrid", "--mode", help="Base search mode: fts, vector, or hybrid."),
+    per_doc_limit: int = typer.Option(3, "--per-doc-limit", min=1, help="Max items per document."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """Build and persist a deterministic retrieval package."""
+    options = _retrieval_search_options_for_vault(vault, mode=mode)
+    with _existing_vault_connection(vault) as connection:
+        try:
+            result = retrieve_chunks(
+                connection,
+                query,
+                top_k=top_k or options.top_k,
+                candidate_k=candidate_k,
+                per_doc_limit=per_doc_limit,
+                mode=mode,
+                search_options=options,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "retrieval_run_id": result.retrieval_run_id,
+                    "query_text": result.query_text,
+                    "normalized_query_text": result.normalized_query_text,
+                    "linked_search_query_id": result.linked_search_query_id,
+                    "status": result.status,
+                    "warnings": list(result.warnings),
+                    "top_k": result.top_k,
+                    "candidate_k": result.candidate_k,
+                    "per_doc_limit": result.per_doc_limit,
+                    "base_mode": result.base_mode,
+                    "result_count": result.result_count,
+                    "items": [
+                        {
+                            "retrieval_item_id": item.retrieval_item_id,
+                            "rank": item.rank,
+                            "doc_id": item.doc_id,
+                            "revision_id": item.revision_id,
+                            "chunk_id": item.chunk_id,
+                            "title": item.title,
+                            "source_path": item.source_path,
+                            "quote": item.quote,
+                            "snippet": item.snippet,
+                            "base_score": item.base_score,
+                            "taxonomy_score": item.taxonomy_score,
+                            "final_score": item.final_score,
+                            "match_source": item.match_source,
+                            "reasons": list(item.reasons),
+                        }
+                        for item in result.items
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        raise typer.Exit(0 if result.status != "failed" else 1)
+
+    console.print(f"Retrieval run: {result.retrieval_run_id} ({result.status})")
+    console.print(f"Query: {result.query_text}")
+    if result.normalized_query_text != result.query_text:
+        console.print(f"Normalized: {result.normalized_query_text}")
+    if result.warnings:
+        console.print("Warnings:")
+        for warning in result.warnings:
+            console.print(f"- {warning}")
+    if not result.items:
+        console.print("No retrieval items")
+        raise typer.Exit(1)
+    for item in result.items:
+        console.print(f"{item.rank}. {item.match_source} score={item.final_score}")
+        console.print(f"doc_id: {item.doc_id}")
+        console.print(f"revision_id: {item.revision_id}")
+        console.print(f"chunk_id: {item.chunk_id}")
+        console.print(f"reasons: {', '.join(item.reasons)}")
+        console.print(f"quote: {item.quote[:200]}")
+
+
+@retrieval_app.command("list")
+def retrieval_list(
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    limit: int = typer.Option(20, "--limit", min=1, help="Maximum runs to list."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """List persisted retrieval runs."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_retrieval_runs(connection, limit=limit)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "runs": [
+                        {
+                            "retrieval_run_id": row["retrieval_run_id"],
+                            "query_text": row["query_text"],
+                            "normalized_query_text": row["normalized_query_text"],
+                            "base_mode": row["base_mode"],
+                            "result_count": row["result_count"],
+                            "status": row["status"],
+                            "created_at": row["created_at"],
+                        }
+                        for row in rows
+                    ]
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if not rows:
+        console.print("No retrieval runs")
+        return
+    table = Table(title="Retrieval Runs")
+    table.add_column("Run")
+    table.add_column("Status")
+    table.add_column("Items")
+    table.add_column("Mode")
+    table.add_column("Created")
+    for row in rows:
+        table.add_row(
+            str(row["retrieval_run_id"]),
+            str(row["status"]),
+            str(row["result_count"]),
+            str(row["base_mode"]),
+            str(row["created_at"]),
+        )
+    console.print(table)
+
+
+@retrieval_app.command("show")
+def retrieval_show(
+    retrieval_run_id: str = typer.Argument(..., help="Retrieval run ID."),
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """Show a persisted retrieval package."""
+    with _existing_vault_connection(vault) as connection:
+        run = get_retrieval_run(connection, retrieval_run_id)
+        if run is None:
+            console.print(f"[red]Retrieval run not found: {retrieval_run_id}[/red]")
+            raise typer.Exit(1)
+        items = list_retrieval_items(connection, retrieval_run_id)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "run": dict(run),
+                    "items": [dict(item) for item in items],
+                },
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        )
+        return
+    console.print(f"Retrieval run: {run['retrieval_run_id']} ({run['status']})")
+    console.print(f"Query: {run['query_text']}")
+    for item in items:
+        console.print(f"{item['rank']}. {item['chunk_id']} score={item['final_score']}")
+        console.print(f"quote: {str(item['quote'])[:200]}")
 
 
 @app.command()
@@ -2885,6 +3064,19 @@ def _search_options_for_vault(vault_path: Path, *, top_k: int | None, mode: str 
     )
 
 
+def _retrieval_search_options_for_vault(vault_path: Path, *, mode: str = "hybrid") -> SearchOptions:
+    config_path = vault_path / ".indbase" / "config" / "config.toml"
+    search_config = load_config(config_path).search if config_path.is_file() else SearchConfig()
+    options = SearchOptions.from_config(search_config)
+    return SearchOptions(
+        top_k=options.top_k,
+        log_queries=options.log_queries,
+        persist_search_results=False,
+        cjk_strategy=options.cjk_strategy,
+        mode=mode,
+    )
+
+
 def _load_document_for_cli(connection: sqlite3.Connection, doc_id: str) -> sqlite3.Row | None:
     return connection.execute(
         """
@@ -3357,6 +3549,7 @@ app.add_typer(translation_app, name="translate")
 app.add_typer(card_app, name="card")
 app.add_typer(profile_app, name="profile")
 app.add_typer(taxonomy_app, name="taxonomy")
+app.add_typer(retrieval_app, name="retrieval")
 app.add_typer(output_app, name="output")
 output_app.add_typer(output_runtime_app, name="runtime")
 output_app.add_typer(output_export_app, name="export")
