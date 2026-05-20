@@ -59,7 +59,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: uv sync --group dev
+      - name: Install with swallow extra
+        run: uv sync --group dev --extra swallow
 
       - name: v0.2 deterministic release gate
         run: uv run python scripts/v02_deterministic_release_gate.py
