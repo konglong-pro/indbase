@@ -89,7 +89,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --extra swallow
 
       - name: v0.3.1 taxonomy release gate
         run: uv run python scripts/v031_taxonomy_release_gate.py

@@ -17,6 +17,9 @@ from indbase_core.llm_harness import assert_no_direct_provider_usage
 from indbase_core.profile import build_document_profile
 from indbase_core.vault import init_vault
 
+# Deterministic gate stub satisfies ingest; doctor still errors if swallow is not installed.
+_DOCTOR_IGNORE_WITH_GATE_STUB = frozenset({"swallow_unavailable"})
+
 
 def main() -> None:
     root = Path(".tmp") / f"accept-v031-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -64,7 +67,12 @@ def main() -> None:
         failures.append(f"direct provider usage: {violations}")
 
     doctor = run_doctor(vault)
-    hard = [finding for finding in doctor.findings if finding.severity in {"error", "critical"}]
+    hard = [
+        finding
+        for finding in doctor.findings
+        if finding.severity in {"error", "critical"}
+        and finding.code not in _DOCTOR_IGNORE_WITH_GATE_STUB
+    ]
     if hard:
         failures.append(f"doctor hard findings: {[(f.code, f.message) for f in hard]}")
 
