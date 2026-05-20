@@ -380,9 +380,14 @@ def env_enabled(name: str) -> bool:
 
 
 def run_subprocess_gate(script_name: str) -> dict[str, object]:
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    src_path = str(ROOT / "src")
+    env["PYTHONPATH"] = src_path if not existing else f"{src_path}{os.pathsep}{existing}"
     completed = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / script_name)],
         cwd=ROOT,
+        env=env,
         text=True,
         encoding="utf-8",
         errors="replace",

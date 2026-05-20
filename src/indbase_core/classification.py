@@ -10,7 +10,9 @@ import sqlite3
 from indbase_core.documents import set_document_category
 from indbase_core.ids import new_prefixed_id
 from indbase_core.reviews import create_review_item
-from indbase_core.tags import add_document_tag, list_document_tags
+from indbase_core.tag_candidates import record_missing_tag_candidate
+from indbase_core.tags import add_document_tag, list_document_tags, normalize_tag_name
+from indbase_core.taxonomy import LEGACY_TAG_TYPE_BY_NORMALIZED_NAME
 from indbase_core.tasks import add_task_event, create_task, finish_task, start_task
 from indbase_core.time import utc_now_iso
 
@@ -259,7 +261,19 @@ def accept_classification_suggestion(
     tags_added: list[str] = []
     if apply_tags:
         for tag_name in _json_list(row["suggested_tags_json"]):
-            change = add_document_tag(connection, doc_id, tag_name)
+            try:
+                change = add_document_tag(connection, doc_id, tag_name)
+            except ValueError:
+                normalized = normalize_tag_name(tag_name)
+                tag_type = LEGACY_TAG_TYPE_BY_NORMALIZED_NAME.get(normalized, "topic")
+                record_missing_tag_candidate(
+                    connection,
+                    doc_id=doc_id,
+                    revision_id=str(row["revision_id"]),
+                    tag_name=tag_name,
+                    tag_type=tag_type,
+                )
+                continue
             if change.changed:
                 tags_added.append(change.tag_name)
 

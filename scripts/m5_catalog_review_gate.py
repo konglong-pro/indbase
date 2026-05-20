@@ -72,6 +72,7 @@ def main() -> None:
         ).fetchone()[0]
 
     run_indb(0, "doc", "set-category", doc_id, category_id, "--vault", str(vault))
+    run_indb(0, "tag", "add", "m5-gate", "--type", "topic", "--vault", str(vault))
     run_indb(0, "doc", "add-tag", doc_id, "m5-gate", "--vault", str(vault))
 
     active_list = run_indb(0, "doc", "list", "--vault", str(vault))

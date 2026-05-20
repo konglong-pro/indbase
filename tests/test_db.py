@@ -16,6 +16,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0005_candidate_cards",
         "0006_swallow_ingest_integration",
         "0007_transition_output_integration",
+        "0008_taxonomy_foundation",
     ]
 
     connection = connect(db_path)
@@ -49,7 +50,16 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0005_candidate_cards",
             "0006_swallow_ingest_integration",
             "0007_transition_output_integration",
+            "0008_taxonomy_foundation",
         ]
+        assert "document_profiles" in tables
+        assert "feature_atoms" in tables
+        assert "tag_candidates" in tables
+        assert "taxonomy_suggestions" in tables
+        assert "tag_lifecycle_events" in tables
+        assert "model_calls" in tables
+        tag_columns = {row["name"] for row in connection.execute("PRAGMA table_info(tags)")}
+        assert {"type", "status", "created_by"} <= tag_columns
         review_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(review_items)")
@@ -105,7 +115,15 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             row["name"]
             for row in connection.execute("PRAGMA table_info(documents)")
         }
-        assert {"access_context", "privacy_flags_json", "source_snapshot_path"} <= document_columns
+        assert {
+            "access_context",
+            "privacy_flags_json",
+            "source_snapshot_path",
+            "category_source",
+            "category_suggestion_id",
+            "category_updated_by",
+            "category_updated_at",
+        } <= document_columns
     finally:
         connection.close()
 

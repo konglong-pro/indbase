@@ -1,0 +1,478 @@
+# v0.3.1 Taxonomy Foundation Agent Guide
+
+Read this before implementing v0.3.1 taxonomy work.
+
+Canonical project spec:
+
+- `docs/planning/v0.3.1-taxonomy-foundation.md`
+
+Baseline context:
+
+- `AGENTS.md`
+- `docs/project-status.md`
+- `docs/testing.md`
+- `docs/planning/mvp-v0.1-spec.md`
+- `docs/planning/v0.2-swallow-ingest-integration.md`
+- `docs/planning/v0.2-transition-output-integration.md`
+
+## Mission
+
+Build a governed taxonomy layer before intelligent retrieval.
+
+Short version:
+
+```text
+L1 cannot be chaotic.
+L2 must be governed.
+L3 can be open, but must be evidence-bound.
+LLM can suggest meaning, but must not own taxonomy.
+```
+
+v0.3.1 is not a search or answer phase. It prepares directory/category and tag data so later retrieval can rely on it.
+
+## Non-negotiables
+
+- Do not implement `indb ask`.
+- Do not implement `search-smart`, retrieval planner, retrieval packages, or ranking changes in this phase.
+- Do not generate answers for user queries.
+- Do not let LLMs directly write categories, tags, aliases, or document tag assignments.
+- Do not let LLMs create, delete, rename, merge, or assign categories.
+- Do not create formal L2 tags without review or explicit promotion.
+- Do not allow untyped tags.
+- Do not allow feature atoms without chunk, type, confidence, and quote evidence.
+- Do not use feature atoms from old revisions or archived documents in default current taxonomy operations.
+- Do not let taxonomy workflows write source Markdown, revisions, chunks, source files, originals, or output artifacts.
+- Do not bypass `indbase-llm-harness` for any model call.
+
+## Architecture Boundary
+
+indbase owns:
+
+- taxonomy schema
+- category and tag registries
+- document profile records
+- feature atom records
+- tag candidates
+- taxonomy suggestions
+- review items
+- tag lifecycle events
+- accepted category and tag mutations
+- doctor checks
+
+LLM providers may only return:
+
+- schema-validated suggestion payloads
+- model call records
+- rejected invalid outputs
+
+LLM providers must not own:
+
+- document identity
+- revision identity
+- chunk identity
+- final taxonomy mutation
+- search result construction
+- user-facing answers
+
+## Phase Scope
+
+Implement:
+
+- typed managed tags
+- tag alias hardening
+- document tag assignment provenance
+- document profiles
+- feature atoms
+- tag candidates
+- taxonomy suggestions
+- category suggestions targeting existing categories
+- taxonomy janitor suggestions
+- CLI/TUI review flows
+- doctor checks
+- fake-provider LLM harness tests before real provider behavior
+
+Do not implement:
+
+- search-smart
+- retrieval planner
+- retrieval package storage
+- query expansion
+- LLM answer generation
+- vector retrieval changes
+- auto tag promotion by occurrence thresholds
+- auto category creation
+
+## Confirmed Execution Rules
+
+These decisions are part of the v0.3.1 implementation contract. The canonical detail lives in `docs/planning/v0.3.1-taxonomy-foundation.md`.
+
+### Delivery
+
+Implement in four slices:
+
+1. Schema, legacy backfill, validation, and doctor hard checks.
+2. Deterministic profiles, feature atoms, and tag candidate manager.
+3. Review/accept flows, category manager, FTS metadata refresh after accepted mutations, and janitor V1.
+4. Fake-provider LLM harness and gates.
+
+Do not combine the whole taxonomy plan into one large implementation.
+
+### Migration And Schema
+
+- Backfill known legacy tags deterministically: `ai=topic`, `rag=method`, `embedding=method`, `ocr=method`, `sqlite=tool`, `python=tool`, and unknown active tags as `topic`.
+- Backfilled tags use `status=active` and `created_by=legacy_migration`.
+- Add light category provenance on `documents`; backfill uncategorized as `system_seed` and other existing categories as `manual_legacy`.
+- Use hard SQLite constraints for new taxonomy tables where practical, but avoid risky rebuilds of old tables unless explicitly justified.
+- Use ID prefixes `profile`, `feat`, `tagcand`, `taxsugg`, `tagevent`, and `modelcall`.
+
+### Tags And Aliases
+
+- New formal tag creation must require an explicit allowed type. Do not silently default new tags to `topic`.
+- Candidate promotion may explicitly override candidate type only through a human command, and must record that override.
+- Add alias status: `active`, `deprecated`, `blocked`.
+- Keep `normalized_alias` globally unique. Deprecated or blocked aliases must prevent accidental recreation.
+- Keep `document_tags` as the current assignment table keyed by `(doc_id, tag_id)`; do not add assignment history rows in v0.3.1.
+
+### Suggestions And Review
+
+- New v0.3.1 governance flows write `taxonomy_suggestions`; `classification_suggestions` remains for compatibility and historical reads.
+- Legacy classification acceptance must not directly create missing formal tags. Route missing tags to candidates or taxonomy review.
+- Generic `review resolve` must not apply taxonomy mutations. Mutations happen through dedicated taxonomy/classification commands, which then resolve related review items.
+- Require `doc_id` and `revision_id` only for document-bound suggestion types such as `category_assign`, `tag_assign`, and document-derived `tag_candidate`.
+
+### Profiles And Features
+
+- Profile build is explicit. Do not run profile extraction inside ingest or re-ingest.
+- Source shell means no current source revision. Reject profile and taxonomy suggestion flows for documents without a current revision, non-`revisioned` ingest status, or current chunks.
+- Deterministic profile V1 writes a traceable digest, not a natural-language summary.
+- Feature extraction V1 is conservative, dependency-free, and capped at Top 5 features per chunk and Top 30 per document.
+- Deterministic feature quotes must be exact substrings of the referenced chunk. LLM-origin quotes must pass the same evidence validation.
+
+### Managers
+
+- Fuzzy tag matching V1 uses standard-library matching only, after exact tag and alias matches, and only within the same tag type.
+- Candidate dedupe is status-aware. Do not recreate rejected, blocked, merged, archived, or accepted candidates as fresh duplicates.
+- Category manager V1 uses category name, description, include/exclude rules, accepted feedback, accepted category suggestions, and existing keyword fallback. Do not add a category examples table.
+- Accepted category and document-tag mutations may refresh current FTS metadata. Pending profiles, feature atoms, candidates, and suggestions must not affect default search.
+
+### Janitor And Harness
+
+- Janitor V1 should focus on deterministic low-noise findings: duplicate active tags, alias collisions, candidate conflicts, promoted-without-tag corruption, assigned inactive tags, stale document-bound suggestions, empty active categories, and old low-frequency candidates.
+- Keep overbroad tags, overloaded categories, and fuzzy merge suggestions as warnings or deferred work.
+- v0.3.1 only implements the fake-provider harness contract. Do not add real provider dependencies, API key loading, or network model calls.
+
+## Required Model
+
+### L1 Category
+
+Categories are the controlled directory layer.
+
+Rules:
+
+- Suggest existing categories only.
+- Do not create categories from model output.
+- Protect manual category assignments.
+- Require force for explicit manual overwrite.
+- Keep categories low-cardinality.
+
+### L2 Managed Tags
+
+Managed tags are formal, typed tags.
+
+Allowed types:
+
+```text
+topic
+method
+tool
+entity
+workflow
+format
+language
+project
+```
+
+Rules:
+
+- Reject invalid tag types.
+- New tags first enter `tag_candidates`.
+- Formal tag creation requires user promotion in v0.3.1.
+- Tag aliases must not collide by normalized alias.
+- Record lifecycle events for created, merged, deprecated, archived, restored, blocked, and promoted tags.
+
+### L3 Feature Atoms
+
+Feature atoms are derived evidence-bound features.
+
+Rules:
+
+- Bind each feature to one existing chunk.
+- Ensure chunk belongs to the same doc and revision.
+- Require type, confidence, source, and quote.
+- Mark old features stale after revision changes.
+- Do not expose L3 as formal tags.
+- Limit features per chunk and per document.
+
+## Implementation Order
+
+1. Add schema migration.
+2. Add typed tag validation and assignment provenance helpers.
+3. Add doctor taxonomy checks before broad behavior.
+4. Add deterministic profile builder.
+5. Add feature atom extraction and validation.
+6. Add tag candidate creation and deduplication.
+7. Add exact and alias tag matching.
+8. Add fuzzy tag matching.
+9. Add category suggestion v2.
+10. Add CLI and TUI review flows.
+11. Add taxonomy janitor.
+12. Add LLM harness foundation with fake provider.
+13. Add LLM arbitration that writes suggestions only.
+
+Do not write prompts before the schema, manager, review, and doctor boundaries are implemented.
+
+## Schema Rules
+
+Use a new migration after `0007_transition_output_integration.sql`.
+
+Harden existing tables:
+
+- `tags`: add type, status, and created_by.
+- `document_tags`: add revision, source, evidence, suggestion, status, and created_by provenance.
+
+Add new tables:
+
+- `document_profiles`
+- `feature_atoms`
+- `tag_candidates`
+- `taxonomy_suggestions`
+- `tag_lifecycle_events`
+
+Optional later:
+
+- `taxonomy_audit_runs`
+
+Compatibility:
+
+- Keep existing `classification_suggestions`.
+- Do not migrate everything into `taxonomy_suggestions` until v0.3.1 behavior is stable.
+
+## Profile Rules
+
+`indb profile build <doc_id>` must:
+
+- require an active document
+- reject source shells
+- reject archived documents by default
+- require current revision
+- require current chunks
+- bind the profile to the current revision
+- mark prior active profile/features stale after re-ingest
+- write deterministic features first
+
+Invalid profile outputs must fail visibly through tasks, errors, or review records as appropriate.
+
+## Feature Atom Rules
+
+Each feature atom must have:
+
+- `doc_id`
+- `revision_id`
+- `chunk_id`
+- `text`
+- `normalized_text`
+- allowed type
+- confidence
+- quote
+- source
+- status
+
+Reject or ignore:
+
+- missing chunk
+- mismatched doc/revision/chunk relation
+- missing quote
+- invalid type
+- low confidence when attempting tag candidate promotion
+
+## Tag Manager Rules
+
+Use this flow:
+
+```text
+feature atom
+  -> exact active tag match
+  -> exact alias match
+  -> fuzzy lexical match
+  -> optional vector similarity
+  -> optional LLM arbitration
+  -> suggestion / candidate / local keyword
+```
+
+Thresholds:
+
+```text
+score >= 0.90
+  high-confidence existing tag suggestion
+
+0.75 <= score < 0.90
+  reviewed tag assignment suggestion
+
+0.55 <= score < 0.75
+  ambiguous review
+
+score < 0.55
+  tag candidate or local keyword
+```
+
+v0.3.1 must keep automatic promotion disabled. Store future promotion thresholds if useful, but do not enable them.
+
+## Category Manager Rules
+
+Category suggestions must:
+
+- reference an existing category
+- include confidence
+- include evidence chunks where available
+- become stale when source revision changes
+- respect manual category protection
+
+Automatic category assignment is disabled in v0.3.1.
+
+Force category overwrite must be explicit:
+
+```text
+indb classify accept <suggestion_id> --force-category
+```
+
+## Review And CLI Rules
+
+Use `review_items` for CLI/TUI review.
+
+Every reviewable taxonomy object should show:
+
+- target type
+- target id
+- suggestion source
+- confidence
+- evidence chunks
+- quote excerpts
+- risk reason
+
+Avoid hidden mutations from list commands.
+
+Batch actions:
+
+- default off for LLM-origin suggestions
+- must display counts and risk summary
+- must not accept category overwrites without force
+
+## Janitor Rules
+
+Janitor may produce findings and suggestions for:
+
+- duplicate tags
+- alias collisions
+- merge candidates
+- low-frequency candidates
+- stale candidates
+- overbroad tags
+- overloaded categories
+- empty categories
+
+Janitor must not:
+
+- physically delete tags
+- bulk merge tags automatically
+- overwrite document tag assignments
+- create categories
+- mutate source data
+
+## LLM Harness Rules
+
+All provider calls must pass through `indbase-llm-harness`.
+
+Required behavior:
+
+- provider config
+- prompt registry
+- fake provider
+- schema validation
+- model call records
+- timeout and retry policy
+- invalid output rejection
+- token and cost logging when available
+- evidence validation
+
+Allowed LLM outputs:
+
+- `taxonomy_suggestions`
+- `tag_candidates`
+- review items
+- model call records
+
+Forbidden LLM outputs:
+
+- direct `documents.category_id` mutation
+- direct `document_tags` mutation
+- direct `tags` or `tag_aliases` mutation
+- source Markdown mutation
+- search answers
+
+## Doctor Expectations
+
+Default doctor must check taxonomy integrity without calling LLMs.
+
+Add hard findings for:
+
+- feature atoms missing chunks
+- feature atoms pointing to wrong revision
+- active profiles for old revisions
+- active profiles for archived docs
+- invalid tag types
+- alias collisions
+- tag candidates without evidence
+- promoted candidates without tags
+- taxonomy suggestions pointing to missing revisions, categories, or tags
+- document tag assignments pointing to missing documents or tags
+- merged tags still assigned without expected alias or lifecycle state
+
+Deep doctor may check harness provider config and fake-provider smoke behavior only when explicitly requested.
+
+Doctor diagnoses only. It must not repair taxonomy state.
+
+## Test Expectations
+
+Add focused tests first:
+
+- schema migration applies cleanly
+- invalid tag types rejected
+- alias collisions detected
+- profile build rejects archived and source shell docs
+- feature atoms require chunk/type/confidence/quote
+- re-ingest marks profile/features stale
+- exact and alias matching create suggestions
+- new tag candidates require evidence
+- formal tags are not created without promotion
+- category suggestions target existing categories only
+- manual category overwrite requires force
+- janitor creates suggestions without mutating tags
+- LLM harness rejects invalid schema
+- no business module directly calls providers
+
+Then add gate scripts matching the canonical plan.
+
+## Completion Report
+
+Every implementation turn should report:
+
+- changed files
+- schema changes
+- CLI commands touched
+- taxonomy objects covered
+- review flows touched
+- doctor checks added
+- tests run
+- tests not run
+- remaining risks
+- whether any LLM path can directly mutate formal taxonomy

@@ -16,6 +16,16 @@ uv run python -m compileall -q src tests scripts
 uv run python scripts/v02_deterministic_release_gate.py
 uv run python scripts/doctor_negative_gate.py
 
+# v0.3.1 taxonomy N1 gates (layer C2)
+uv run python scripts/v031_taxonomy_release_gate.py
+uv run python scripts/v031_acceptance_e2e.py
+
+# v0.3.1 taxonomy dogfood (layer E; repo-local by default)
+uv run python scripts/v031_real_corpus_dogfood_gate.py
+# Private corpus:
+# $env:INDB_REAL_CORPUS='D:\path\to\files'
+# uv run python scripts/v031_real_corpus_dogfood_gate.py
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -28,6 +38,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | --- | --- | --- |
 | A/B — pytest + compileall | A, B | `uv run python -m pytest`, `compileall` |
 | C — v0.2 deterministic vault + doctor negative | C | deterministic + doctor negative scripts |
+| C2 — v0.3.1 taxonomy N1 gates | C2 | `scripts/v031_taxonomy_release_gate.py` (n1–n6) + `scripts/v031_acceptance_e2e.py` |
 | D — real swallow smoke | D | `INDBASE_SWALLOW_SMOKE=1`, `uv sync --extra swallow` |
 | D — real Node transition smoke | D | `INDBASE_TRANSITION_SMOKE=1`, Node 20 |
 
@@ -111,8 +122,19 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v02_transition_smoke_gate.py` | D | Real `node` bridge subprocess + evidence archive |
 | `v02_real_corpus_dogfood_gate.py` | E | Folder ingest + doctor hard = 0 on real/staged corpus |
 | `v02_release_gate.py` | A–E aggregate | All required layers; D/E per env |
+| `v031_taxonomy_release_gate.py` | C2 | Schema/doctor, profile/features, tag candidates, category manager, janitor audit, fake LLM harness (n1–n6) |
+| `v031_real_corpus_dogfood_gate.py` | E (v0.3.1) | Repo-local or `INDB_REAL_CORPUS`: ingest → profiles → taxonomy analyze/suggest → janitor → doctor hard = 0 |
 
-Shared helpers: `scripts/gate_common.py`.
+Shared helpers: `scripts/gate_common.py`, `scripts/taxonomy_gate_common.py`.
+
+### v0.3.1 taxonomy tests
+
+| Tests | What they prove |
+| --- | --- |
+| `test_taxonomy_schema.py` | Migration `0008`, typed tags, doctor taxonomy integrity |
+| `test_profile_taxonomy.py` | Profile build, feature atoms, deterministic taxonomy analyze |
+| `test_taxonomy_slice3.py` | Suggestions accept/reject, category manager, tag candidates, janitor audit-only |
+| `test_llm_harness.py` | Fake provider, schema/quote validation, `model_calls`, no direct provider imports |
 
 ## Historical MVP gates (reference only)
 

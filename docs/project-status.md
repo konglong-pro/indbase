@@ -14,6 +14,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.1 Foundation MVP** | Frozen and shipped as `0.1.0`; full MVP feature stack (ingest → search → doctor → archive, plus M4–M10 features) implemented |
 | **v0.2 swallow-backed ingest** | **Active expansion — implemented** in core/CLI; production conversion requires `features.swallow_ingest=true` |
 | **v0.2 transition-backed output** | **Active expansion — implemented** in core/CLI; requires explicit `indb output runtime install` |
+| **v0.3.1 taxonomy foundation** | **Implemented** — typed tags, profiles, taxonomy suggestions, fake LLM harness; see `docs/planning/v0.3.1-taxonomy-foundation.md` |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -132,6 +133,7 @@ indb doc normalize <doc_id> --replace-current
 | A | `pytest` (232 tests) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
+| C2 | `v031_taxonomy_release_gate.py` (N1 taxonomy gates) | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |
 | E | Real-corpus dogfood | No (manual/scheduled workflow) |
 

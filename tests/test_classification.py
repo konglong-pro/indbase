@@ -17,7 +17,7 @@ from indbase_core.documents import archive_document, set_document_category
 from indbase_core.ingest import run_m3_ingest_pipeline
 from indbase_core.ocr import run_ocr_for_document
 from indbase_core.search import search_chunks
-from indbase_core.tags import list_document_tags
+from indbase_core.tags import add_tag, list_document_tags
 from indbase_core.vault import init_vault
 
 
@@ -66,6 +66,7 @@ def test_classification_accept_applies_explicit_metadata_and_records_feedback(tm
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         category_id = add_category(connection, "AI Research")
+        add_tag(connection, "rag", tag_type="method")
         suggest_classifications(connection)
         suggestion_id = connection.execute("SELECT suggestion_id FROM classification_suggestions").fetchone()[0]
         result = accept_classification_suggestion(connection, suggestion_id, reason="accepted in test")
@@ -168,21 +169,33 @@ def test_cli_classification_suggest_list_accept_json(tmp_path) -> None:
     assert runner.invoke(app, ["catalog", "add", "AI Research", "--vault", str(vault)]).exit_code == 0
     assert runner.invoke(app, ["ingest", str(source), "--vault", str(vault)]).exit_code == 0
 
-    suggest = runner.invoke(app, ["classify", "suggest", "--vault", str(vault), "--json"])
+    with connect(vault / ".indbase" / "db.sqlite") as connection:
+        doc_id = connection.execute("SELECT doc_id FROM documents").fetchone()["doc_id"]
+
+    profile = runner.invoke(app, ["profile", "build", doc_id, "--vault", str(vault)])
+    suggest = runner.invoke(
+        app,
+        ["classify", "suggest", doc_id, "--min-confidence", "0.5", "--vault", str(vault), "--json"],
+    )
     listed = runner.invoke(app, ["classify", "list", "--vault", str(vault), "--json"])
     suggestion_id = json.loads(listed.output)["suggestions"][0]["suggestion_id"]
     accepted = runner.invoke(app, ["classify", "accept", suggestion_id, "--vault", str(vault), "--json"])
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
-        feedback_count = connection.execute("SELECT COUNT(*) AS count FROM classification_feedback").fetchone()["count"]
+        document = connection.execute(
+            "SELECT category_source, category_suggestion_id FROM documents WHERE doc_id = ?",
+            (doc_id,),
+        ).fetchone()
 
+    assert profile.exit_code == 0
     assert suggest.exit_code == 0
     assert json.loads(suggest.output)["suggested_documents"] == 1
     assert listed.exit_code == 0
     assert json.loads(listed.output)["suggestions"][0]["status"] == "pending"
     assert accepted.exit_code == 0
     assert json.loads(accepted.output)["status"] == "accepted"
-    assert feedback_count == 1
+    assert document["category_source"] == "accepted_suggestion"
+    assert document["category_suggestion_id"] == suggestion_id
 
 
 def test_classification_stales_old_suggestion_after_changed_reingest(tmp_path) -> None:
@@ -385,6 +398,7 @@ def test_classification_accept_deduplicates_normalized_tags(tmp_path) -> None:
         doc_id = connection.execute("SELECT doc_id FROM documents").fetchone()["doc_id"]
         suggest_classifications(connection, doc_id=doc_id)
         suggestion_id = connection.execute("SELECT suggestion_id FROM classification_suggestions").fetchone()[0]
+        add_tag(connection, "LLM", tag_type="topic")
         connection.execute(
             "UPDATE classification_suggestions SET suggested_tags_json = ? WHERE suggestion_id = ?",
             (json.dumps(["LLM", "llm", "large language model"]), suggestion_id),
@@ -401,11 +415,12 @@ def test_classification_accept_deduplicates_normalized_tags(tmp_path) -> None:
             WHERE dt.doc_id = ?
               AND t.normalized_name = 'llm'
               AND dt.deleted_at IS NULL
+              AND dt.status = 'active'
             """,
             (doc_id,),
         ).fetchone()["count"]
 
-    assert result.tags_added == ("LLM", "large language model")
+    assert result.tags_added == ("LLM",)
     assert llm_tags == 1
     assert llm_doc_tags == 1
 
