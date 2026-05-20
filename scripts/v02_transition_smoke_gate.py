@@ -49,8 +49,8 @@ def main() -> None:
     )
     paths = vault_paths(vault)
     paths.ensure_layout()
-    doc_id = "doc_20250101_smoke01"
-    revision_id = "rev_doc_20250101_smoke01_0001"
+    doc_id = "doc_20250101_5f3a9c"
+    revision_id = "rev_doc_20250101_5f3a9c_0001"
     markdown_path = paths.source_markdown_path(doc_id, "transition-smoke", 1)
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
     markdown = (
@@ -99,7 +99,7 @@ def main() -> None:
         "layer": "D",
         "gate": "v02_transition_smoke",
         "output_run_id": result.output_run_id,
-        "status": result.status,
+        "output_status": result.status,
         "transition_output": load_config(paths.config_path).features.transition_output,
     }
     write_gate_summary(summary, gate_name="V02_TRANSITION_SMOKE_GATE", gate_root=gate_root)
