@@ -42,6 +42,9 @@ packages = [
   "src/indbase_cli",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel.force-include]
 "src/indbase_core/migrations" = "indbase_core/migrations"
 "src/indbase_core/transition_templates" = "indbase_core/transition_templates"
