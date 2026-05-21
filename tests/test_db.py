@@ -18,6 +18,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0007_transition_output_integration",
         "0008_taxonomy_foundation",
         "0009_retrieval_intelligence",
+        "0010_retrieval_evaluation",
     ]
 
     connection = connect(db_path)
@@ -53,7 +54,10 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0007_transition_output_integration",
             "0008_taxonomy_foundation",
         "0009_retrieval_intelligence",
+        "0010_retrieval_evaluation",
         ]
+        assert "retrieval_eval_cases" in tables
+        assert "answer_readiness_reports" in tables
         assert "document_profiles" in tables
         assert "feature_atoms" in tables
         assert "tag_candidates" in tables

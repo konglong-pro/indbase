@@ -67,6 +67,15 @@ from indbase_core.retrieval import (
     list_retrieval_runs,
     retrieve_chunks,
 )
+from indbase_core.retrieval_evaluation import (
+    assess_answer_readiness,
+    export_eval_cases_jsonl,
+    get_eval_run,
+    import_eval_cases_from_jsonl,
+    list_eval_results,
+    list_eval_runs,
+    run_eval_suite,
+)
 from indbase_core.search import SearchOptions, search_chunks
 from indbase_core.tags import (
     add_document_tag,
@@ -187,6 +196,11 @@ output_export_app = typer.Typer(help="Read-only output export.", no_args_is_help
 profile_app = typer.Typer(help="Build and inspect document profiles.", no_args_is_help=True)
 taxonomy_app = typer.Typer(help="Taxonomy analysis and governance.", no_args_is_help=True)
 retrieval_app = typer.Typer(help="Inspect persisted retrieval packages.", no_args_is_help=True)
+eval_app = typer.Typer(help="Deterministic evaluation workflows.", no_args_is_help=True)
+eval_retrieval_app = typer.Typer(
+    help="Retrieval evaluation cases, runs, and answer readiness.",
+    no_args_is_help=True,
+)
 console = Console()
 
 
@@ -639,6 +653,243 @@ def retrieval_show(
     for item in items:
         console.print(f"{item['rank']}. {item['chunk_id']} score={item['final_score']}")
         console.print(f"quote: {str(item['quote'])[:200]}")
+
+
+@eval_retrieval_app.command("import")
+def eval_retrieval_import(
+    jsonl_path: Path = typer.Argument(..., help="JSONL file with eval cases."),
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    source: str = typer.Option("fixture", "--source", help="Case source: fixture, dogfood, manual."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """Import retrieval evaluation cases from JSONL."""
+    with _existing_vault_connection(vault) as connection:
+        result = import_eval_cases_from_jsonl(connection, jsonl_path, source=source)
+    payload = {
+        "imported": result.imported,
+        "updated": result.updated,
+        "rejected": result.rejected,
+        "errors": list(result.errors),
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        console.print(
+            f"Imported {result.imported}, updated {result.updated}, rejected {result.rejected}"
+        )
+        for error in result.errors:
+            console.print(f"- {error}")
+    if result.rejected:
+        raise typer.Exit(1)
+
+
+@eval_retrieval_app.command("export")
+def eval_retrieval_export(
+    suite: str = typer.Option(..., "--suite", help="Suite name to export."),
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    output: Path | None = typer.Option(None, "--output", help="Write JSONL to this path."),
+) -> None:
+    """Export active retrieval evaluation cases as JSONL."""
+    with _existing_vault_connection(vault) as connection:
+        content = export_eval_cases_jsonl(connection, suite=suite)
+    if output is not None:
+        output.write_text(content, encoding="utf-8")
+        console.print(f"Wrote {output}")
+    else:
+        typer.echo(content, nl=False)
+
+
+@eval_retrieval_app.command("run")
+def eval_retrieval_run(
+    suite: str = typer.Option(..., "--suite", help="Suite name to execute."),
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    case: str | None = typer.Option(None, "--case", help="Run a single eval_case_id."),
+    limit: int | None = typer.Option(None, "--limit", min=1, help="Maximum cases to run."),
+    fail_fast: bool = typer.Option(False, "--fail-fast", help="Stop after first failed/error case."),
+    mode: str = typer.Option("hybrid", "--mode", help="Default search mode when case omits mode."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """Run retrieval evaluation cases and persist results."""
+    options = _retrieval_search_options_for_vault(vault, mode=mode)
+    with _existing_vault_connection(vault) as connection:
+        result = run_eval_suite(
+            connection,
+            suite=suite,
+            case_id=case,
+            limit=limit,
+            fail_fast=fail_fast,
+            search_options=options,
+        )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "eval_run_id": result.eval_run_id,
+                    "suite": result.suite,
+                    "status": result.status,
+                    "case_count": result.case_count,
+                    "passed_count": result.passed_count,
+                    "failed_count": result.failed_count,
+                    "error_count": result.error_count,
+                    "results": [
+                        {
+                            "eval_result_id": item.eval_result_id,
+                            "eval_case_id": item.eval_case_id,
+                            "status": item.status,
+                            "retrieval_run_id": item.retrieval_run_id,
+                            "readiness_report_id": item.readiness_report_id,
+                            "failures": list(item.failures),
+                            "error": item.error,
+                        }
+                        for item in result.results
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        console.print(f"Eval run: {result.eval_run_id} ({result.status})")
+        console.print(
+            f"Cases {result.case_count}: passed={result.passed_count} "
+            f"failed={result.failed_count} errors={result.error_count}"
+        )
+        for item in result.results:
+            console.print(f"- {item.eval_case_id}: {item.status}")
+            if item.failures:
+                console.print(f"  failures: {', '.join(item.failures)}")
+            if item.error:
+                console.print(f"  error: {item.error}")
+    if result.failed_count > 0 or result.error_count > 0:
+        raise typer.Exit(1)
+
+
+@eval_retrieval_app.command("list")
+def eval_retrieval_list(
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    limit: int = typer.Option(20, "--limit", min=1, help="Maximum runs to list."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """List persisted retrieval evaluation runs."""
+    with _existing_vault_connection(vault) as connection:
+        rows = list_eval_runs(connection, limit=limit)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "runs": [
+                        {
+                            "eval_run_id": row["eval_run_id"],
+                            "suite": row["suite"],
+                            "status": row["status"],
+                            "case_count": row["case_count"],
+                            "passed_count": row["passed_count"],
+                            "failed_count": row["failed_count"],
+                            "error_count": row["error_count"],
+                            "created_at": row["created_at"],
+                        }
+                        for row in rows
+                    ]
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if not rows:
+        console.print("No eval runs")
+        return
+    table = Table(title="Retrieval Eval Runs")
+    table.add_column("Run")
+    table.add_column("Suite")
+    table.add_column("Status")
+    table.add_column("Passed")
+    table.add_column("Failed")
+    for row in rows:
+        table.add_row(
+            str(row["eval_run_id"]),
+            str(row["suite"]),
+            str(row["status"]),
+            str(row["passed_count"]),
+            str(row["failed_count"]),
+        )
+    console.print(table)
+
+
+@eval_retrieval_app.command("show")
+def eval_retrieval_show(
+    eval_run_id: str = typer.Argument(..., help="Evaluation run ID."),
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """Show a retrieval evaluation run and its results."""
+    with _existing_vault_connection(vault) as connection:
+        run = get_eval_run(connection, eval_run_id)
+        if run is None:
+            console.print(f"[red]Eval run not found: {eval_run_id}[/red]")
+            raise typer.Exit(1)
+        results = list_eval_results(connection, eval_run_id)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {"run": dict(run), "results": [dict(row) for row in results]},
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        )
+        return
+    console.print(f"Eval run: {run['eval_run_id']} ({run['status']})")
+    for row in results:
+        console.print(
+            f"- {row['eval_case_id']}: {row['status']} "
+            f"retrieval={row['retrieval_run_id']} readiness={row['readiness_report_id']}"
+        )
+
+
+@eval_retrieval_app.command("readiness")
+def eval_retrieval_readiness(
+    retrieval_run_id: str = typer.Argument(..., help="Retrieval run ID to assess."),
+    vault: Path = typer.Option(Path("."), "--vault", help="Vault directory."),
+    json_output: bool = typer.Option(False, "--json", help="Emit structured JSON."),
+) -> None:
+    """Assess answer readiness for a persisted retrieval run."""
+    with _existing_vault_connection(vault) as connection:
+        try:
+            report = assess_answer_readiness(connection, retrieval_run_id)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "readiness_report_id": report.readiness_report_id,
+                    "retrieval_run_id": report.retrieval_run_id,
+                    "policy_version": report.policy_version,
+                    "verdict": report.verdict,
+                    "score": report.score,
+                    "blockers": list(report.blockers),
+                    "warnings": list(report.warnings),
+                    "metrics": report.metrics,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        console.print(f"Readiness: {report.verdict} (score={report.score})")
+        console.print(f"Report: {report.readiness_report_id}")
+        if report.blockers:
+            console.print("Blockers:")
+            for blocker in report.blockers:
+                console.print(f"- {blocker}")
+        if report.warnings:
+            console.print("Warnings:")
+            for warning in report.warnings:
+                console.print(f"- {warning}")
+    if report.verdict == "not_ready":
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -3550,6 +3801,8 @@ app.add_typer(card_app, name="card")
 app.add_typer(profile_app, name="profile")
 app.add_typer(taxonomy_app, name="taxonomy")
 app.add_typer(retrieval_app, name="retrieval")
+eval_app.add_typer(eval_retrieval_app, name="retrieval")
+app.add_typer(eval_app, name="eval")
 app.add_typer(output_app, name="output")
 output_app.add_typer(output_runtime_app, name="runtime")
 output_app.add_typer(output_export_app, name="export")

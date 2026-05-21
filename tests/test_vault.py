@@ -23,6 +23,7 @@ def test_init_vault_creates_layout_config_db_categories_and_task(tmp_path: Path)
         "0007_transition_output_integration",
         "0008_taxonomy_foundation",
         "0009_retrieval_intelligence",
+        "0010_retrieval_evaluation",
     )
     assert result.inserted_categories == 6
 

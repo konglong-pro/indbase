@@ -20,6 +20,7 @@ uv run python scripts/doctor_negative_gate.py
 uv run python scripts/v031_taxonomy_release_gate.py
 uv run python scripts/v031_acceptance_e2e.py
 uv run python scripts/v032_retrieval_release_gate.py
+uv run python scripts/v033_retrieval_eval_release_gate.py
 
 # v0.3.1 taxonomy dogfood (layer E; repo-local by default)
 uv run python scripts/v031_real_corpus_dogfood_gate.py
@@ -44,6 +45,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | C — v0.2 deterministic vault + doctor negative | C | deterministic + doctor negative scripts |
 | C2 — v0.3.1 taxonomy N1 gates | C2 | `scripts/v031_taxonomy_release_gate.py` (n1–n6) + `scripts/v031_acceptance_e2e.py` |
 | C3 — v0.3.2 retrieval release gate | C3 | `scripts/v032_retrieval_release_gate.py` |
+| C4 — v0.3.3 retrieval eval release gate | C4 | `scripts/v033_retrieval_eval_release_gate.py` |
 | D — real swallow smoke | D | `INDBASE_SWALLOW_SMOKE=1`, `uv sync --extra swallow` |
 | D — real Node transition smoke | D | `INDBASE_TRANSITION_SMOKE=1`, Node 20 |
 

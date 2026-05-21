@@ -125,6 +125,30 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
 
+  retrieval-eval-v033:
+    name: C4 — v0.3.3 retrieval eval release gate
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install with swallow extra
+        run: uv sync --group dev --extra swallow
+
+      - name: v0.3.3 retrieval eval release gate
+        run: uv run python scripts/v033_retrieval_eval_release_gate.py
+        env:
+          PYTHONIOENCODING: utf-8
+
   swallow-smoke:
     name: D — real swallow smoke
     runs-on: ubuntu-latest

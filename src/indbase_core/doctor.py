@@ -196,6 +196,7 @@ def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
             findings.extend(_check_review_queue(connection))
             findings.extend(_check_taxonomy_integrity(connection))
             findings.extend(_check_retrieval_integrity(connection))
+            findings.extend(_check_retrieval_evaluation_integrity(connection))
         finally:
             connection.close()
     except sqlite3.Error as exc:
@@ -2768,6 +2769,181 @@ def _check_retrieval_integrity(connection: sqlite3.Connection) -> list[DoctorFin
                 )
             )
     return findings
+
+
+def _eval_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'retrieval_eval_cases'
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _check_retrieval_evaluation_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _eval_schema_ready(connection):
+        return []
+
+    findings: list[DoctorFinding] = []
+    for row in connection.execute(
+        """
+        SELECT eval_case_id, options_json, expectations_json, status
+        FROM retrieval_eval_cases
+        ORDER BY created_at DESC
+        LIMIT 200
+        """
+    ).fetchall():
+        case_id = str(row["eval_case_id"])
+        for field, code in (
+            ("options_json", "retrieval_eval_case_invalid_json"),
+            ("expectations_json", "retrieval_eval_case_invalid_json"),
+        ):
+            try:
+                json.loads(str(row[field] or "{}"))
+            except json.JSONDecodeError:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        code,
+                        f"Eval case {case_id} has invalid {field}.",
+                    )
+                )
+        if str(row["status"]) not in {"active", "archived"}:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_case_invalid_json",
+                    f"Eval case {case_id} has invalid status.",
+                )
+            )
+
+    for row in connection.execute(
+        """
+        SELECT er.eval_result_id, er.eval_run_id, er.eval_case_id, er.retrieval_run_id,
+               run.eval_run_id AS run_exists, case_row.eval_case_id AS case_exists,
+               rr.retrieval_run_id AS retrieval_exists
+        FROM retrieval_eval_results er
+        LEFT JOIN retrieval_eval_runs run ON run.eval_run_id = er.eval_run_id
+        LEFT JOIN retrieval_eval_cases case_row ON case_row.eval_case_id = er.eval_case_id
+        LEFT JOIN retrieval_runs rr ON rr.retrieval_run_id = er.retrieval_run_id
+        ORDER BY er.created_at DESC
+        LIMIT 500
+        """
+    ).fetchall():
+        result_id = str(row["eval_result_id"])
+        if row["run_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_result_missing_run",
+                    f"Eval result {result_id} references missing eval run.",
+                )
+            )
+        if row["case_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_result_missing_case",
+                    f"Eval result {result_id} references missing eval case.",
+                )
+            )
+        if row["retrieval_run_id"] and row["retrieval_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_result_missing_retrieval_run",
+                    f"Eval result {result_id} references missing retrieval run.",
+                )
+            )
+
+    for row in connection.execute(
+        """
+        SELECT readiness_report_id, retrieval_run_id, verdict, blockers_json,
+               warnings_json, metrics_json
+        FROM answer_readiness_reports
+        ORDER BY created_at DESC
+        LIMIT 200
+        """
+    ).fetchall():
+        report_id = str(row["readiness_report_id"])
+        run_id = str(row["retrieval_run_id"])
+        run = connection.execute(
+            "SELECT retrieval_run_id FROM retrieval_runs WHERE retrieval_run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if run is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "readiness_report_missing_retrieval_run",
+                    f"Readiness report {report_id} references missing retrieval run {run_id}.",
+                )
+            )
+        if str(row["verdict"]) not in {"ready", "needs_more_evidence", "not_ready"}:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "readiness_report_invalid_verdict",
+                    f"Readiness report {report_id} has invalid verdict.",
+                )
+            )
+        for field, code in (
+            ("blockers_json", "readiness_report_invalid_json"),
+            ("warnings_json", "readiness_report_invalid_json"),
+            ("metrics_json", "readiness_report_invalid_json"),
+        ):
+            try:
+                json.loads(str(row[field] or "{}"))
+            except json.JSONDecodeError:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        code,
+                        f"Readiness report {report_id} has invalid {field}.",
+                    )
+                )
+        blockers = _doctor_json_list(row["blockers_json"])
+        for item in connection.execute(
+            """
+            SELECT retrieval_item_id, quote, chunk_id
+            FROM retrieval_items
+            WHERE retrieval_run_id = ?
+            """,
+            (run_id,),
+        ).fetchall():
+            quote = str(item["quote"] or "")
+            chunk = connection.execute(
+                "SELECT text FROM chunks WHERE chunk_id = ?",
+                (item["chunk_id"],),
+            ).fetchone()
+            if chunk is None:
+                continue
+            if quote.strip() and quote not in str(chunk["text"]):
+                if "quote_not_in_chunk" not in blockers:
+                    findings.append(
+                        DoctorFinding(
+                            "error",
+                            "readiness_report_quote_blocker_missing",
+                            (
+                                f"Readiness report {report_id} should block quote mismatch "
+                                f"for item {item['retrieval_item_id']}."
+                            ),
+                        )
+                    )
+    return findings
+
+
+def _doctor_json_list(raw: object) -> list[str]:
+    try:
+        payload = json.loads(str(raw or "[]"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [str(item) for item in payload]
 
 
 def _split_frontmatter(markdown: str) -> tuple[dict[str, object] | None, str]:
