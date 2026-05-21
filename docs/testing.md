@@ -23,6 +23,9 @@ uv run python scripts/v032_retrieval_release_gate.py
 
 # v0.3.1 taxonomy dogfood (layer E; repo-local by default)
 uv run python scripts/v031_real_corpus_dogfood_gate.py
+
+# v0.3.2 retrieval dogfood (optional; writes docs/planning/v0.3.2-retrieval-dogfood-report.md)
+uv run python scripts/v032_retrieval_real_corpus_dogfood.py
 # Private corpus:
 # $env:INDB_REAL_CORPUS='D:\path\to\files'
 # uv run python scripts/v031_real_corpus_dogfood_gate.py
