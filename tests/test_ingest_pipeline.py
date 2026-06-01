@@ -1,10 +1,20 @@
 from pathlib import Path
 
+import pytest
+
 import indbase_core.normalizers as normalizers
 from indbase_core.db import connect
-from indbase_core.ingest import run_m2_ingest_pipeline, run_m3_ingest_pipeline
+from indbase_core.ingest import M3_PIPELINE_CHECKPOINT_STAGES, run_m2_ingest_pipeline, run_m3_ingest_pipeline
 from indbase_core.search import search_chunks
 from indbase_core.vault import init_vault
+
+
+class CheckpointCancelled(Exception):
+    """SDK-compatible cancellation marker for pipeline tests (no consoler import)."""
+
+    def __init__(self, checkpoint: str) -> None:
+        self.checkpoint = checkpoint
+        super().__init__(f"cancelled at {checkpoint}")
 
 
 def test_m2_ingest_pipeline_writes_revision_without_search_indexing(tmp_path: Path) -> None:
@@ -705,3 +715,53 @@ def test_m3_reingest_same_normalized_markdown_skips_empty_revision(tmp_path: Pat
     assert second_item["status"] == "succeeded"
     assert second_item["doc_id"] == document["doc_id"]
     assert search.result_count == 1
+
+
+def test_m3_ingest_pipeline_invokes_checkpoint_stages(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    init_vault(vault)
+    source = tmp_path / "note.md"
+    source.write_text("# Note\nBody\n", encoding="utf-8")
+    seen: list[str] = []
+
+    run_m3_ingest_pipeline(vault, source, checkpoint=seen.append)
+
+    assert seen == list(M3_PIPELINE_CHECKPOINT_STAGES)
+
+
+def test_m3_ingest_pipeline_cancelled_checkpoint_reraises_and_cancels_task(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    init_vault(vault)
+    source = tmp_path / "note.md"
+    source.write_text("# Note\nBody\n", encoding="utf-8")
+
+    def checkpoint(stage: str) -> None:
+        if stage == "archive":
+            raise CheckpointCancelled("archive")
+
+    with pytest.raises(CheckpointCancelled) as exc_info:
+        run_m3_ingest_pipeline(vault, source, checkpoint=checkpoint)
+
+    assert exc_info.value.checkpoint == "archive"
+
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        task = connection.execute(
+            "SELECT status, error_json FROM tasks ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        event_types = [
+            row["event_type"]
+            for row in connection.execute(
+                "SELECT event_type FROM task_events ORDER BY created_at"
+            )
+        ]
+    finally:
+        connection.close()
+
+    assert task["status"] == "cancelled"
+    assert task["error_json"] is not None
+    assert '"checkpoint": "archive"' in task["error_json"]
+    assert '"type": "CheckpointCancelled"' in task["error_json"]
+    assert "ingest_cancelled" in event_types

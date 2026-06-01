@@ -20,9 +20,12 @@ from indbase_core.ingest import run_m3_ingest_pipeline
 from indbase_core.paths import vault_paths
 
 from indbase_agent.ingest_probe import probe_ingest_file
+from indbase_agent.artifact_view import (
+    build_indbase_artifact_view,
+    ingest_artifact_metadata_with_vault,
+)
 from indbase_agent.ingest_state_snapshot import (
     capture_ingest_state_snapshot,
-    ingest_artifact_metadata,
     vault_state_unified_diff,
 )
 
@@ -123,12 +126,20 @@ class IndbaseAgentAdapter(AgentAdapter):
         run_id: str,
         emitter,
         cancel_flag,
+        interaction=None,
     ) -> dict[str, Any]:
         self.validate(command, args)
         if command == "indbase.doctor":
             return self._execute_doctor(args, plan, emitter=emitter, cancel_flag=cancel_flag)
         if command == "indbase.ingest_file":
-            return self._execute_ingest(args, plan, emitter=emitter, cancel_flag=cancel_flag)
+            return self._execute_ingest(
+                args,
+                plan,
+                action_id=action_id,
+                emitter=emitter,
+                cancel_flag=cancel_flag,
+                interaction=interaction,
+            )
         raise AgentError("command.not_found", f"Unknown command: {command}")
 
     def _validate_vault(self, args: dict[str, Any]) -> None:
@@ -180,7 +191,7 @@ class IndbaseAgentAdapter(AgentAdapter):
         )
         return {
             "preview_kind": "static",
-            "summary": f"Static preview for indbase.doctor on {vault_path}",
+            "summary": f"Static preview for vault check on {vault_path}",
             "details": {
                 "reads_vault": False,
                 "steps": steps,
@@ -219,13 +230,48 @@ class IndbaseAgentAdapter(AgentAdapter):
         args: dict[str, Any],
         plan: dict[str, Any],
         *,
+        action_id: str,
         emitter,
         cancel_flag,
+        interaction=None,
     ) -> dict[str, Any]:
         steps = StepHelper(emitter)
         progress = ProgressHelper(emitter)
         vault_path = Path(str(args["vault_path"])).expanduser()
         source_path = Path(str(args["source_path"])).expanduser()
+        probe = probe_ingest_file(vault_path, source_path)
+        duplicates = probe.get("duplicates", {})
+        if duplicates.get("is_duplicate"):
+            if interaction is None:
+                raise AgentError(
+                    "interaction.required",
+                    "Duplicate source detected; interaction helper is required to choose skip or continue",
+                    details={"duplicates": duplicates},
+                )
+            choice = self._request_duplicate_choice(
+                interaction,
+                action_id=action_id,
+                probe=probe,
+                vault_path=vault_path,
+                source_path=source_path,
+            )
+            if choice == "skip":
+                cancel_flag.check("duplicate-skip")
+                progress.update(1.0, "Skipped duplicate ingest")
+                return {
+                    "blocks": self._ingest_skipped_blocks(
+                        probe,
+                        vault_path.as_posix(),
+                        source_path.as_posix(),
+                    )
+                }
+            if choice != "continue":
+                raise AgentError(
+                    "interaction.invalid",
+                    f"Unexpected duplicate choice: {choice!r}",
+                    details={"expected": ["skip", "continue"]},
+                )
+
         before_snapshot = capture_ingest_state_snapshot(vault_path, source_path)
 
         def run_pipeline():
@@ -234,6 +280,7 @@ class IndbaseAgentAdapter(AgentAdapter):
                 vault_path,
                 source_path,
                 recursive=False,
+                checkpoint=cancel_flag.check,
             )
 
         result = steps.run("ingest-pipeline", "Run ingest pipeline", run_pipeline)
@@ -251,6 +298,83 @@ class IndbaseAgentAdapter(AgentAdapter):
         )
         return {"blocks": blocks}
 
+    def _request_duplicate_choice(
+        self,
+        interaction: Any,
+        *,
+        action_id: str,
+        probe: dict[str, Any],
+        vault_path: Path,
+        source_path: Path,
+    ) -> str:
+        duplicates = probe.get("duplicates", {})
+        inspection = probe.get("inspection", {})
+        summary = (
+            f"Source `{source_path.name}` already exists in vault `{vault_path.name}`.\n\n"
+            f"- by_source_hash: `{duplicates.get('by_source_hash') or 'none'}`\n"
+            f"- by_normalized_source_uri: `{duplicates.get('by_normalized_source_uri') or 'none'}`"
+        )
+        response = interaction.request(
+            interaction_id=f"duplicate-{action_id}",
+            title="Duplicate source detected",
+            message="This source matches an existing document in the vault. Choose skip or continue.",
+            choices=[
+                {"id": "skip", "label": "Skip ingest"},
+                {"id": "continue", "label": "Continue ingest"},
+            ],
+            blocks=[
+                markdown_block(summary, title="Duplicate summary"),
+                json_block(
+                    {"duplicates": duplicates, "inspection": inspection},
+                    title="Duplicate probe",
+                ),
+            ],
+        )
+        if not isinstance(response, str):
+            raise AgentError(
+                "interaction.invalid",
+                "Duplicate choice response must be a choice id string",
+            )
+        return response
+
+    def _ingest_skipped_blocks(
+        self,
+        probe: dict[str, Any],
+        vault_path: str,
+        source_path: str,
+    ) -> list[dict[str, Any]]:
+        duplicates = probe.get("duplicates", {})
+        doc_ids = [
+            value
+            for value in (
+                duplicates.get("by_source_hash"),
+                duplicates.get("by_normalized_source_uri"),
+            )
+            if value
+        ]
+        unique_doc_ids = list(dict.fromkeys(doc_ids))
+        summary = (
+            f"# File import skipped\n\n"
+            f"Vault: `{vault_path}`\n\n"
+            f"Source: `{source_path}`\n\n"
+            f"Status: **skipped**\n\n"
+            f"Duplicate detected; ingest pipeline was not run."
+        )
+        rows = [["existing_doc_id", doc_id] for doc_id in unique_doc_ids] or [["existing_doc_id", "(none)"]]
+        return [
+            markdown_block(summary, title="Ingest skipped"),
+            table_block(["field", "doc_id"], rows, title="Existing documents"),
+            json_block(
+                {
+                    "status": "skipped",
+                    "reason": "duplicate_source",
+                    "duplicates": duplicates,
+                    "existing_doc_ids": unique_doc_ids,
+                },
+                title="Skip result",
+            ),
+        ]
+
     def _doctor_blocks(self, report: dict[str, Any], vault_path: str) -> list[dict[str, Any]]:
         findings = report.get("findings", [])
         if isinstance(findings, list):
@@ -262,7 +386,7 @@ class IndbaseAgentAdapter(AgentAdapter):
 
         exit_code = int(report.get("exit_code", 0))
         summary = (
-            f"# indbase.doctor\n\n"
+            f"# Vault check\n\n"
             f"Vault: `{vault_path}`\n\n"
             f"Exit code: **{exit_code}**\n\n"
             f"Findings: {len(findings)} total"
@@ -289,7 +413,7 @@ class IndbaseAgentAdapter(AgentAdapter):
         after_snapshot: dict[str, Any],
     ) -> list[dict[str, Any]]:
         summary = (
-            f"# indbase.ingest_file\n\n"
+            f"# File import\n\n"
             f"Vault: `{vault_path}`\n\n"
             f"Source: `{source_path}`\n\n"
             f"Status: **{result.status}**\n\n"
@@ -334,15 +458,35 @@ class IndbaseAgentAdapter(AgentAdapter):
                 title="Vault state diff",
             ),
         ]
-        blocks.extend(self._ingest_artifact_blocks(result, after_snapshot))
+        blocks.extend(
+            self._ingest_artifact_blocks(result, after_snapshot, Path(vault_path))
+        )
         return blocks
+
+    def get_artifact_view(
+        self,
+        *,
+        artifact_uri: str,
+        kind: str,
+        block_id: str,
+        action_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return build_indbase_artifact_view(
+            artifact_uri=artifact_uri,
+            kind=kind,
+            block_id=block_id,
+            action_id=action_id,
+            metadata=metadata,
+        )
 
     def _ingest_artifact_blocks(
         self,
         result: Any,
         after_snapshot: dict[str, Any],
+        vault_path: Path,
     ) -> list[dict[str, Any]]:
-        metadata = ingest_artifact_metadata(result, after_snapshot)
+        metadata = ingest_artifact_metadata_with_vault(result, after_snapshot, vault_path)
         blocks: list[dict[str, Any]] = [
             artifact_block(
                 f"indbase://ingest_runs/{result.ingest_id}",

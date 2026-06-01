@@ -3,6 +3,14 @@
   "name": "indbase",
   "version": "0.1.0",
   "protocol_version": "0",
+  "artifact_retrieval": {
+    "uri_schemes": ["indbase"],
+    "kinds": [
+      "indbase.ingest_run",
+      "indbase.document",
+      "indbase.document_revision"
+    ]
+  },
   "commands": [
     {
       "name": "indbase.doctor",

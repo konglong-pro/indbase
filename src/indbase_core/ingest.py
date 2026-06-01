@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -36,6 +37,74 @@ from indbase_core.swallow_adapter import (
 )
 from indbase_core.tasks import add_task_event, create_task, finish_task, start_task
 from indbase_core.time import utc_now_iso
+
+M3_PIPELINE_CHECKPOINT_STAGES = (
+    "plan",
+    "archive",
+    "conversion",
+    "revision",
+    "chunk",
+    "index",
+    "finalize",
+)
+
+
+class IngestCheckpointCancelled(Exception):
+    def __init__(self, checkpoint: str, original: BaseException) -> None:
+        self.checkpoint = checkpoint
+        self.original = original
+        super().__init__(str(original))
+
+
+def _cancelled_checkpoint(exc: BaseException) -> str | None:
+    checkpoint = getattr(exc, "checkpoint", None)
+    return checkpoint if isinstance(checkpoint, str) and checkpoint else None
+
+
+def _invoke_checkpoint(checkpoint: Callable[[str], None] | None, stage: str) -> None:
+    if checkpoint is None:
+        return
+    try:
+        checkpoint(stage)
+    except BaseException as exc:
+        cancelled_checkpoint = _cancelled_checkpoint(exc)
+        if cancelled_checkpoint is not None:
+            raise IngestCheckpointCancelled(cancelled_checkpoint, exc) from exc
+        raise
+
+
+def _finish_pipeline_task_on_error(
+    connection: sqlite3.Connection,
+    task_id: str,
+    exc: BaseException,
+) -> None:
+    if isinstance(exc, IngestCheckpointCancelled):
+        checkpoint = exc.checkpoint
+        original = exc.original
+        add_task_event(
+            connection,
+            task_id,
+            "ingest_cancelled",
+            "Ingest cancelled at cooperative checkpoint.",
+            {"checkpoint": checkpoint},
+        )
+        finish_task(
+            connection,
+            task_id,
+            "cancelled",
+            error_data={
+                "type": original.__class__.__name__,
+                "message": str(original),
+                "checkpoint": checkpoint,
+            },
+        )
+        return
+    finish_task(
+        connection,
+        task_id,
+        "failed",
+        error_data={"type": type(exc).__name__, "message": str(exc)},
+    )
 
 
 @dataclass(frozen=True)
@@ -295,6 +364,7 @@ def run_m3_ingest_pipeline(
     *,
     recursive: bool = False,
     ingest_config: IngestConfig | None = None,
+    checkpoint: Callable[[str], None] | None = None,
 ) -> IngestPipelineResult:
     resolved_ingest_config = _resolve_ingest_config(vault_path, ingest_config)
     connection = connect(Path(vault_path) / ".indbase" / "db.sqlite")
@@ -310,6 +380,7 @@ def run_m3_ingest_pipeline(
         )
         start_task(connection, task_id)
         add_task_event(connection, task_id, "ingest_started", "M3 searchable ingest started.")
+        _invoke_checkpoint(checkpoint, "plan")
         plan = plan_ingest_sources(
             connection,
             source_input,
@@ -329,6 +400,7 @@ def run_m3_ingest_pipeline(
                 "duplicate_items": plan.duplicate_items,
             },
         )
+        _invoke_checkpoint(checkpoint, "archive")
         archive_result = archive_pending_sources(
             connection,
             vault_path,
@@ -345,6 +417,7 @@ def run_m3_ingest_pipeline(
                 "failed_items": archive_result.failed_items,
             },
         )
+        _invoke_checkpoint(checkpoint, "conversion")
         conversion_result = convert_archived_sources(connection, vault_path, plan.ingest_id)
         add_task_event(
             connection,
@@ -357,6 +430,7 @@ def run_m3_ingest_pipeline(
                 "failed_items": conversion_result.failed_items,
             },
         )
+        _invoke_checkpoint(checkpoint, "revision")
         revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
         add_task_event(
             connection,
@@ -368,6 +442,7 @@ def run_m3_ingest_pipeline(
                 "failed_items": revision_result.failed_items,
             },
         )
+        _invoke_checkpoint(checkpoint, "chunk")
         chunked_documents = _chunk_written_revisions(connection, vault_path, revision_result.written_revisions)
         add_task_event(
             connection,
@@ -378,6 +453,7 @@ def run_m3_ingest_pipeline(
                 "chunked_documents": chunked_documents,
             },
         )
+        _invoke_checkpoint(checkpoint, "index")
         index_result = rebuild_fts_index(connection, vault_path)
         current_index_failed_documents = _mark_current_ingest_index_failures(
             connection,
@@ -396,6 +472,7 @@ def run_m3_ingest_pipeline(
                 "current_ingest_failed_documents": current_index_failed_documents,
             },
         )
+        _invoke_checkpoint(checkpoint, "finalize")
         _finalize_m3_ingest_run(connection, plan.ingest_id)
         result = _load_pipeline_result(
             connection,
@@ -450,12 +527,9 @@ def run_m3_ingest_pipeline(
         return result
     except Exception as exc:
         if "task_id" in locals():
-            finish_task(
-                connection,
-                task_id,
-                "failed",
-                error_data={"type": type(exc).__name__, "message": str(exc)},
-            )
+            _finish_pipeline_task_on_error(connection, task_id, exc)
+        if isinstance(exc, IngestCheckpointCancelled):
+            raise exc.original from exc
         raise
     finally:
         connection.close()
