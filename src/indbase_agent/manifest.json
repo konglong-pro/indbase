@@ -1,0 +1,114 @@
+{
+  "agent_id": "indbase",
+  "name": "indbase",
+  "version": "0.1.0",
+  "protocol_version": "0",
+  "artifact_retrieval": {
+    "uri_schemes": ["indbase"],
+    "kinds": [
+      "indbase.ingest_run",
+      "indbase.document",
+      "indbase.document_revision"
+    ]
+  },
+  "commands": [
+    {
+      "name": "indbase.doctor",
+      "description": "Run integrity checks against an indbase vault.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path"],
+        "properties": {
+          "vault_path": {
+            "type": "string",
+            "description": "Path to an existing indbase vault."
+          },
+          "hard_only": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": [
+        "read_vault_files",
+        "read_vault_database",
+        "read_vault_config"
+      ],
+      "permissions": [
+        {
+          "kind": "read_files",
+          "scope": "vault",
+          "description": "Read vault files during execution."
+        },
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read vault SQLite metadata during execution."
+        }
+      ]
+    },
+    {
+      "name": "indbase.ingest_file",
+      "description": "Ingest a single local file into an indbase vault.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path", "source_path"],
+        "properties": {
+          "vault_path": {
+            "type": "string",
+            "description": "Path to an existing indbase vault."
+          },
+          "source_path": {
+            "type": "string",
+            "description": "Path to a single local file to ingest."
+          }
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "probe_readonly",
+        "requires_approval_before_preview": true,
+        "preview_side_effects": [
+          "read_source_file",
+          "read_vault_database"
+        ],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": [
+        "read_source_file",
+        "write_vault_database",
+        "write_vault_files",
+        "read_vault_config"
+      ],
+      "permissions": [
+        {
+          "kind": "read_files",
+          "scope": "source",
+          "description": "Read the source file during preview and execution."
+        },
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read vault SQLite for duplicate detection during preview."
+        },
+        {
+          "kind": "write_database",
+          "scope": "vault",
+          "description": "Write vault SQLite during ingest execution."
+        },
+        {
+          "kind": "write_files",
+          "scope": "vault",
+          "description": "Write vault files during ingest execution."
+        }
+      ]
+    }
+  ]
+}
