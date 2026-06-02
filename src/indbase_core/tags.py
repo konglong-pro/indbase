@@ -239,6 +239,109 @@ def restore_tag(connection: sqlite3.Connection, tag_id: str) -> TagChange:
     return TagChange(tag_id=tag_id, tag_name=str(row["name"]), changed=True)
 
 
+def attach_document_tag_by_id(
+    connection: sqlite3.Connection,
+    doc_id: str,
+    tag_id: str,
+    *,
+    source: str = "manual",
+    confidence: float = 1.0,
+    created_by: str = "manual",
+    revision_id: str | None = None,
+    suggestion_id: str | None = None,
+    evidence_chunk_ids: list[str] | None = None,
+    candidate_id: str | None = None,
+) -> DocumentTagChange:
+    _require_document(connection, doc_id)
+    clean_source = validate_document_tag_source(source)
+    tag_row = connection.execute(
+        """
+        SELECT tag_id, name, status
+        FROM tags
+        WHERE tag_id = ?
+          AND deleted_at IS NULL
+        """,
+        (tag_id,),
+    ).fetchone()
+    if tag_row is None:
+        raise ValueError(f"Tag not found: {tag_id}")
+    if str(tag_row["status"]) not in ASSIGNABLE_TAG_STATUSES:
+        raise ValueError(f"Tag is not assignable: {tag_id} (status={tag_row['status']})")
+    if revision_id is None:
+        revision_id = _current_revision_id(connection, doc_id)
+    now = utc_now_iso()
+    evidence_json = json.dumps(evidence_chunk_ids or [], ensure_ascii=False)
+    existing = connection.execute(
+        """
+        SELECT deleted_at, status
+        FROM document_tags
+        WHERE doc_id = ?
+          AND tag_id = ?
+        """,
+        (doc_id, tag_id),
+    ).fetchone()
+    if existing is None:
+        connection.execute(
+            """
+            INSERT INTO document_tags(
+              doc_id, tag_id, revision_id, source, confidence,
+              evidence_chunk_ids_json, suggestion_id, candidate_id, status, created_by,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                doc_id,
+                tag_id,
+                revision_id,
+                clean_source,
+                confidence,
+                evidence_json,
+                suggestion_id,
+                candidate_id,
+                created_by,
+                now,
+                now,
+            ),
+        )
+        changed = True
+    elif existing["deleted_at"] is not None or str(existing["status"]) != "active":
+        connection.execute(
+            """
+            UPDATE document_tags
+            SET revision_id = ?, source = ?, confidence = ?,
+                evidence_chunk_ids_json = ?, suggestion_id = ?, candidate_id = ?,
+                status = 'active', created_by = ?, deleted_at = NULL, updated_at = ?
+            WHERE doc_id = ?
+              AND tag_id = ?
+            """,
+            (
+                revision_id,
+                clean_source,
+                confidence,
+                evidence_json,
+                suggestion_id,
+                candidate_id,
+                created_by,
+                now,
+                doc_id,
+                tag_id,
+            ),
+        )
+        changed = True
+    else:
+        changed = False
+    if changed:
+        refresh_document_fts_metadata(connection, doc_id)
+    connection.commit()
+    return DocumentTagChange(
+        doc_id=doc_id,
+        tag_id=tag_id,
+        tag_name=str(tag_row["name"]),
+        changed=changed,
+    )
+
+
 def add_document_tag(
     connection: sqlite3.Connection,
     doc_id: str,
@@ -250,6 +353,7 @@ def add_document_tag(
     revision_id: str | None = None,
     suggestion_id: str | None = None,
     evidence_chunk_ids: list[str] | None = None,
+    candidate_id: str | None = None,
 ) -> DocumentTagChange:
     _require_document(connection, doc_id)
     clean_name = _clean_tag_name(tag_name)
@@ -271,73 +375,18 @@ def add_document_tag(
     if str(tag_row["status"]) not in ASSIGNABLE_TAG_STATUSES:
         raise ValueError(f"Tag is not assignable: {clean_name} (status={tag_row['status']})")
 
-    tag_id = str(tag_row["tag_id"])
-    if revision_id is None:
-        revision_id = _current_revision_id(connection, doc_id)
-    now = utc_now_iso()
-    evidence_json = json.dumps(evidence_chunk_ids or [], ensure_ascii=False)
-    existing = connection.execute(
-        """
-        SELECT deleted_at, status
-        FROM document_tags
-        WHERE doc_id = ?
-          AND tag_id = ?
-        """,
-        (doc_id, tag_id),
-    ).fetchone()
-    if existing is None:
-        connection.execute(
-            """
-            INSERT INTO document_tags(
-              doc_id, tag_id, revision_id, source, confidence,
-              evidence_chunk_ids_json, suggestion_id, status, created_by,
-              created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
-            """,
-            (
-                doc_id,
-                tag_id,
-                revision_id,
-                clean_source,
-                confidence,
-                evidence_json,
-                suggestion_id,
-                created_by,
-                now,
-                now,
-            ),
-        )
-        changed = True
-    elif existing["deleted_at"] is not None or str(existing["status"]) != "active":
-        connection.execute(
-            """
-            UPDATE document_tags
-            SET revision_id = ?, source = ?, confidence = ?,
-                evidence_chunk_ids_json = ?, suggestion_id = ?,
-                status = 'active', created_by = ?, deleted_at = NULL, updated_at = ?
-            WHERE doc_id = ?
-              AND tag_id = ?
-            """,
-            (
-                revision_id,
-                clean_source,
-                confidence,
-                evidence_json,
-                suggestion_id,
-                created_by,
-                now,
-                doc_id,
-                tag_id,
-            ),
-        )
-        changed = True
-    else:
-        changed = False
-    if changed:
-        refresh_document_fts_metadata(connection, doc_id)
-    connection.commit()
-    return DocumentTagChange(doc_id=doc_id, tag_id=tag_id, tag_name=clean_name, changed=changed)
+    return attach_document_tag_by_id(
+        connection,
+        doc_id,
+        str(tag_row["tag_id"]),
+        source=clean_source,
+        confidence=confidence,
+        created_by=created_by,
+        revision_id=revision_id,
+        suggestion_id=suggestion_id,
+        evidence_chunk_ids=evidence_chunk_ids,
+        candidate_id=candidate_id,
+    )
 
 
 def remove_document_tag(

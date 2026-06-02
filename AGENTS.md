@@ -16,8 +16,10 @@ For detailed product and architecture planning, use:
 - `docs/agents/transition-output-integration/AGENT.md` for implementation rules specific to the output integration
 - `docs/planning/v0.3.1-taxonomy-category-foundation.md` for the explicitly approved category-only taxonomy foundation
 - `docs/agents/v0.3.1-taxonomy-category-foundation/AGENT.md` for implementation rules specific to the category foundation
+- `docs/planning/v0.3.2-tag-governance-foundation.md` for the explicitly approved tag governance foundation
+- `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md` for implementation rules specific to tag governance
 
-Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
+Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
 
 Do not duplicate the full MVP specification in this file. Treat this file as the operational rulebook for agents, and treat the planning docs as the source of truth for product and architecture details.
 
@@ -41,7 +43,7 @@ Documentation rules:
 
 `indbase` is a local-first personal knowledge database. It ingests local materials into a vault, preserves originals, writes readable Markdown, records metadata and immutable revisions, chunks content, builds SQLite FTS indexes, and returns reliable search snippets tied to source chunks.
 
-The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, and **v0.3.1 category-only taxonomy foundation**.
+The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, and **v0.3.2 tag governance foundation**.
 
 Do not implement other v0.2 or v0.3 functionality unless explicitly instructed in a task.
 
@@ -307,6 +309,30 @@ Rules:
 - Manual assignments and accepted suggestions must not be overwritten automatically.
 - Every automatic classification attempt must write auditable run/result records.
 - Category search/filter is in scope; tag governance, retrieval intelligence, and `ask` are out of scope.
+
+### Active v0.3.2 Tag Governance Foundation
+
+The user explicitly approved the tag governance foundation. For tag work:
+
+```text
+Formal Tags -> Candidate Tags -> Tag Resolution -> Tag Admission Policy
+-> Tag Volume Budget -> Tag Feedback / Harness -> Tag Search Filter
+```
+
+Rules:
+
+- Formal Tags are governed metadata, not raw strings.
+- Automatic workflows must not create new Formal Tags directly.
+- Automatic workflows may auto-attach only existing active Canonical Tags after evidence, confidence, lifecycle, scope, and budget checks.
+- Candidate Tags must pass Tag Resolution before persistence.
+- New-Tag Proposals must pass Tag Admission Policy and Tag Volume Budget before review or promotion.
+- Manual tags must not be deleted, overwritten, or silently replaced by automatic workflows.
+- Deprecated, merged, and archived tags are ineligible for automatic attachment.
+- Tag Feedback and governance events are explicit audit data, not hidden learning.
+- Tag filters must be relation-backed through `document_tags` and resolved Formal Tags, not raw FTS tag strings.
+- Post-Ingest Tagging is disabled by default and feature-flagged.
+- TUI and consoler UI are out of scope; stable `--json` command output is required for future consoler integration.
+- Retrieval packages, `ask`, real providers, embedding-backed taggers, ontology management, project namespaces, and automatic batch propagation are out of scope.
 
 ### v0.3 Intelligent Workflow MVP
 
@@ -677,6 +703,8 @@ If the task belongs to the approved v0.2 swallow ingest expansion, implement it 
 If the task belongs to the approved v0.2 transition output expansion, implement it according to `docs/planning/v0.2-transition-output-integration.md` and `docs/agents/transition-output-integration/AGENT.md`.
 
 If the task belongs to the approved v0.3.1 category-only taxonomy foundation, implement it according to `docs/planning/v0.3.1-taxonomy-category-foundation.md` and `docs/agents/v0.3.1-taxonomy-category-foundation/AGENT.md`.
+
+If the task belongs to the approved v0.3.2 tag governance foundation, implement it according to `docs/planning/v0.3.2-tag-governance-foundation.md` and `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md`.
 
 If the task belongs to any other v0.2 or v0.3 area and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep the current stable layer intact.
 

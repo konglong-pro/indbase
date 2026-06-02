@@ -120,6 +120,10 @@ _Avoid_: big category classification
 A user-approved tag that is allowed to appear in document metadata, tag filters, and trusted search metadata.
 _Avoid_: candidate tag, raw model tag, unreviewed tag
 
+**Manual Tag Creation**:
+A user-initiated creation of a **Formal Tag** that may proceed despite policy warnings because the user is the authority over their tag vocabulary.
+_Avoid_: automatic formal tag creation
+
 **Canonical Tag**:
 The active **Formal Tag** that represents a normalized concept after alias or merge resolution.
 _Avoid_: alias, duplicate tag, display spelling
@@ -136,6 +140,14 @@ _Avoid_: alias only, archived tag
 A **Formal Tag** hidden from normal lists, filters, and automatic tagging without deleting historical records.
 _Avoid_: physically deleted tag
 
+**Tag Scope**:
+The applicability boundary of a **Formal Tag**, initially either global or limited to one **Big Category**.
+_Avoid_: project namespace, duplicate tag name
+
+**Multilingual Tag Alias**:
+A language-specific alias that resolves to the same **Canonical Tag** rather than creating a separate tag identity.
+_Avoid_: translated duplicate tag, locale-specific tag identity
+
 **Candidate Tag**:
 A proposed tag from an agent, harness, or review workflow that has not yet been promoted into trusted document metadata.
 _Avoid_: formal tag, applied tag, accepted tag
@@ -144,13 +156,89 @@ _Avoid_: formal tag, applied tag, accepted tag
 The explicit workflow that turns a **Candidate Tag** into a **Formal Tag** or links it to an existing **Formal Tag**.
 _Avoid_: automatic tag creation, hidden training
 
+**Tag Propagation**:
+A separate explicit workflow that proposes or applies a **Formal Tag** to additional documents based on prior feedback.
+_Avoid_: implicit batch tagging, hidden propagation
+
+**Tag Link Migration**:
+An explicit audited workflow that rewrites existing document-tag links after a merge or cleanup decision.
+_Avoid_: silent merge rewrite, implicit historical edit
+
+**Tag Resolution**:
+The deterministic step that maps a raw tag candidate to a **Canonical Tag**, a blocked/deprecated outcome, or a new-tag proposal before it can enter review.
+_Avoid_: raw tag storage, direct string promotion
+
+**Tag Admission Policy**:
+The deterministic rules that decide whether a resolved new tag proposal may enter review, should be blocked, or should be mapped to existing metadata.
+_Avoid_: accept every candidate, prompt-only filtering
+
+**Tag Blocklist**:
+A user-reviewable governance list that blocks low-value raw tag candidates from entering the normal candidate or promotion path.
+_Avoid_: hardcoded blacklist, deleted tag
+
+**Attach-Existing Candidate**:
+A **Candidate Tag** that proposes attaching an existing **Canonical Tag** to a document.
+_Avoid_: new tag proposal
+
+**New-Tag Proposal**:
+A **Candidate Tag** that proposes creating a new **Formal Tag** after passing resolution, budget, and review checks.
+_Avoid_: auto-created formal tag
+
 **Tag Volume Budget**:
 A governance limit that controls how many tags may be suggested, promoted, or attached so the tag system does not fragment into overly specific labels.
 _Avoid_: unlimited tagging, tag sprawl
 
+**Tag Feedback**:
+An explicit user decision about a tag candidate, tag attachment, merge, alias, deprecation, removal, or policy suggestion.
+_Avoid_: hidden training signal, implicit preference
+
+**Tag Governance Event**:
+An audit record for tag alias, merge, deprecation, archive, scope, promotion, blocklist, or policy changes.
+_Avoid_: silent tag mutation, untracked rename
+
+**Tag Harness**:
+The evaluation workflow that runs tag policy and candidate generation against fixtures and feedback-derived cases.
+_Avoid_: production tagger, hidden model tuning
+
+**Tagger**:
+The deterministic local workflow that proposes or attaches tags using current-revision evidence, formal tag metadata, aliases, and approved tag policy.
+_Avoid_: real provider, hidden LLM call
+
+**Post-Ingest Tagging Stage**:
+An optional feature-flagged tag workflow that runs after trusted revision/chunk/search creation and remains bounded by tag policy and volume budgets.
+_Avoid_: default ingest tagging, conversion stage
+
+**Tag Governance Foundation**:
+The v0.3.2 phase that makes tags trustworthy through formal tags, candidate tags, resolution, admission, budgets, feedback, harness evaluation, and tag search filters.
+_Avoid_: retrieval intelligence, ask, ontology
+
+**Legacy Classification Tag Suggestion**:
+An older tag suggestion embedded in a broad classification suggestion record, kept for compatibility but not used as the core tag governance state.
+_Avoid_: tag governance candidate, formal tag
+
+**Consoler-Facing Command Output**:
+Stable JSON command output designed so future consoler UI can call core workflows without parsing human CLI tables.
+_Avoid_: TUI implementation, Rich table contract, UI business logic
+
+**Tag Policy Suggestion**:
+A reviewable proposal to change tag aliases, merges, deprecations, blocklists, scopes, or admission policy.
+_Avoid_: automatic policy change, hidden learning
+
+**Tag Doctor Finding**:
+A health finding about tag resolution, tag search correctness, candidate integrity, audit integrity, or tag sprawl risk.
+_Avoid_: automatic tag fix, hidden merge
+
+**Auto-Attached Tag**:
+An existing active **Formal Tag** attached by an automatic workflow only after passing evidence, confidence, lifecycle, and volume-budget checks.
+_Avoid_: candidate tag, raw suggestion, manual tag
+
 **Category Search Filter**:
 A search constraint that returns only documents assigned to a selected **Big Category**.
 _Avoid_: tag filter, full-text category mention
+
+**Tag Search Filter**:
+A relationship-backed search constraint that returns only documents or chunks attached to a resolved **Formal Tag**.
+_Avoid_: full-text tag mention, candidate tag match, raw FTS tag string
 
 **Taxonomy Execution Error**:
 A failure to complete the classification workflow itself, distinct from an intentional **Abstain**.
@@ -203,11 +291,38 @@ _Avoid_: top score only
 - **Tag Governance** is separate from **Big Category** classification; tags may provide context but are not governed in the category foundation phase.
 - A **Formal Tag** is trusted metadata; a **Candidate Tag** is reviewable evidence and must not be treated as applied metadata.
 - A **Formal Tag** is multi-select document metadata, unlike the single-select **Big Category**.
+- A **Formal Tag** is globally normalized by default; **Tag Scope** may limit automatic use to a **Big Category** without creating a separate tag namespace.
+- **Manual Tag Creation** may proceed after policy warnings, but automatic workflows remain bound by **Tag Admission Policy** and **Tag Volume Budget**.
 - A **Canonical Tag** is the target used after resolving aliases and merges.
+- A **Multilingual Tag Alias** lets searches and candidates in different languages resolve to the same **Canonical Tag**.
 - **Deprecated Tags**, **Merged Tags**, and **Archived Tags** preserve history without participating in new automatic tagging.
+- Merging or deprecating a tag changes future resolution and search interpretation, but does not rewrite existing document-tag links unless **Tag Link Migration** is explicitly run.
 - Automatic tag workflows may use existing **Formal Tags** or propose **Candidate Tags**, but they must not create new **Formal Tags** without **Tag Promotion**.
-- A **Tag Volume Budget** prevents tag suggestions and promotions from producing tag sprawl.
+- An **Auto-Attached Tag** may only use an existing active **Canonical Tag** with current-revision evidence and sufficient confidence.
+- Automatic tag workflows must not delete, overwrite, or silently replace manual tags.
+- **Deprecated Tags**, **Merged Tags**, and **Archived Tags** are ineligible for automatic attachment.
+- **Tag Resolution** runs before a **Candidate Tag** is persisted.
+- **Tag Admission Policy** blocks low-value new tag proposals such as one-off, overlong, over-specific, path/date/version-like, vague, duplicate, or **Big Category**-equivalent tags.
+- **Tag Blocklist** entries prevent matching raw candidates from entering normal review or promotion, but do not delete existing tags.
+- An **Attach-Existing Candidate** points to a **Canonical Tag** rather than duplicating the raw candidate string.
+- A **New-Tag Proposal** requires review and budget checks before **Tag Promotion** can create a **Formal Tag**.
+- Accepting a **Candidate Tag** applies only to the current document unless a separate **Tag Propagation** workflow is explicitly run.
+- **Tag Propagation** must create reviewable proposals or require an explicit apply command with limits; it is not hidden batch tagging.
+- A **Tag Volume Budget** prevents tag suggestions and promotions from producing tag sprawl; the v1 default is at most 5 auto-attached tags per document, 5 candidates per document, 20 new-tag proposals per run, 200 total candidates per run, and new unseeded tags should normally appear in at least 2 documents before promotion.
 - **Category Search Filter** belongs to the category foundation phase; tag-aware search belongs to **Tag Governance**.
+- A **Tag Search Filter** is authoritative only when it follows `document_tags` through resolved **Formal Tags**.
+- Full-text matches against tag metadata can help broad search, but they are not a trusted **Tag Search Filter**.
+- **Tag Feedback** is explicit audit data, not a hidden training signal.
+- **Tag Governance Events** explain why tag resolution, search, alias, merge, scope, or lifecycle behavior changed.
+- The **Tag Harness** evaluates approved tag policy and feedback-derived cases before release.
+- The first **Tagger** is deterministic and local; real model or embedding providers are out of scope until governance gates are stable.
+- The **Post-Ingest Tagging Stage** is disabled by default and must not roll back trusted source ingestion.
+- A **Post-Ingest Tagging Stage** may auto-attach only safe existing tags and may create only budgeted reviewable candidates.
+- **Tag Governance Foundation** follows the category foundation and does not implement retrieval packages, generated answers, or ontology management.
+- **Legacy Classification Tag Suggestions** may remain compatible with older classification commands, but v0.3.2 tag governance uses dedicated tag runs, candidates, feedback, and governance events.
+- **Tag Governance Foundation** does not implement TUI; run, review, policy, and search commands expose **Consoler-Facing Command Output** for future UI integration.
+- A **Tag Policy Suggestion** is reviewable and must not mutate aliases, merges, scopes, or admission rules without approval.
+- A **Tag Doctor Finding** reports correctness issues as hard findings and tag-sprawl risks as warnings; doctor does not merge, delete, promote, or repair tags automatically.
 - A **Taxonomy Execution Error** is an issue; an intentional **Abstain** is a valid classification outcome.
 - The **Post-Ingest Taxonomy Stage** may classify or abstain after ingest, but it must not roll back trusted source ingestion.
 - A **Confident Assignment** requires **Category Evidence** from the current trusted revision, not unsupported model inference or stale source state.
@@ -247,6 +362,9 @@ _Avoid_: top score only
 
 > **Dev:** "Can an automatic tagger create a new tag and attach it immediately?"
 > **Domain expert:** "No. It may attach existing **Formal Tags** when rules allow, or create **Candidate Tags** for review and **Tag Promotion**."
+
+> **Dev:** "Can the automatic tagger remove a user's manual tag if it seems wrong?"
+> **Domain expert:** "No. It can create a review suggestion, but manual tags are not deleted or overwritten automatically."
 
 ## Flagged Ambiguities
 

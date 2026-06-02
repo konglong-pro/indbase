@@ -1,7 +1,7 @@
 # indbase Project Status
 
-**As of:** 2026-06-01
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, and v0.3.1 category-foundation design)
+**As of:** 2026-06-02
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, and v0.3.2 tag-governance design)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -15,6 +15,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.2 swallow-backed ingest** | **Active expansion — implemented** in core/CLI; production conversion requires `features.swallow_ingest=true` |
 | **v0.2 transition-backed output** | **Active expansion — implemented** in core/CLI; requires explicit `indb output runtime install` |
 | **v0.3.1 taxonomy category foundation** | **Active expansion — implemented (core)**; `indbase_default_v1` catalog, profiles/localizations, auditable classification runs, post-ingest taxonomy (`features.category_taxonomy`), category search filter, doctor checks, fixture gate |
+| **v0.3.2 tag governance foundation** | **Active expansion — implemented (core)**; migration `0011`, tag resolution/admission/budget/blocklist, deterministic tagger, candidate accept/reject + feedback/audit, relation-backed tag search filter, post-ingest tagging flags (`features.tag_governance`, `features.post_ingest_tagging`), doctor checks, fixture gate + CI job |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -31,6 +32,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.2 swallow spec | `docs/planning/v0.2-swallow-ingest-integration.md` |
 | v0.2 transition spec | `docs/planning/v0.2-transition-output-integration.md` |
 | v0.3.1 category foundation spec | `docs/planning/v0.3.1-taxonomy-category-foundation.md` |
+| v0.3.2 tag governance spec | `docs/planning/v0.3.2-tag-governance-foundation.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -66,8 +68,8 @@ Substrate migration `0003_v02_data_substrate.sql` supports later v0.2 tables and
 
 ## v0.2 swallow-backed ingest (implemented)
 
-**Spec:** `docs/planning/v0.2-swallow-ingest-integration.md`  
-**Agent guide:** `docs/agents/swallow-ingest-integration/AGENT.md`  
+- **Spec:** `docs/planning/v0.2-swallow-ingest-integration.md`
+- **Agent guide:** `docs/agents/swallow-ingest-integration/AGENT.md`
 **Migration:** `0006_swallow_ingest_integration.sql`
 
 ### Product rules in force
@@ -94,8 +96,8 @@ Substrate migration `0003_v02_data_substrate.sql` supports later v0.2 tables and
 
 ## v0.2 transition-backed output (implemented)
 
-**Spec:** `docs/planning/v0.2-transition-output-integration.md`  
-**Agent guide:** `docs/agents/transition-output-integration/AGENT.md`  
+- **Spec:** `docs/planning/v0.2-transition-output-integration.md`
+- **Agent guide:** `docs/agents/transition-output-integration/AGENT.md`
 **Migration:** `0007_transition_output_integration.sql`
 
 ### Product rules in force
@@ -156,13 +158,46 @@ Not yet implemented in this pass: `catalog profile set`, `catalog migrate-defaul
 
 Tag governance, retrieval packages, `ask`, real model providers, hidden online learning, source mutation, and destructive category migration remain out of scope.
 
+## v0.3.2 tag governance foundation (implemented core)
+
+- **Spec:** `docs/planning/v0.3.2-tag-governance-foundation.md`
+- **Agent guide:** `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md`
+- **ADR:** `docs/adr/0002-governed-tag-promotion.md`
+
+**Delivered in core/CLI/tests:**
+
+- Migration `0011_v032_tag_governance_foundation.sql` (tagger runs/results, feedback, blocklist, governance events; extended tags/aliases/document_tags/candidates)
+- Tag Resolution, Admission Policy, Volume Budget, Blocklist, governance eval compose
+- Deterministic local tagger (`run_deterministic_tagger`) with auto-attach of existing canonical tags only
+- Candidate accept/reject with Tag Feedback and Tag Governance Events; document-scoped acceptance
+- Relation-backed tag filter for `indb search` (`--tag`, `tag:<ref>`) and trusted FTS tag metadata
+- Feature flags: `tag_governance`, `post_ingest_tagging` (default off); post-ingest hook after trusted revision/chunks/FTS
+- Doctor: tag-governance integrity checks
+- Gate: `scripts/v032_tag_governance_release_gate.py` + `tests/fixtures/v032_tag_governance/`; CI job **C2b — v0.3.2 tag governance gate**
+
+**Primary gate metrics (must pass):**
+
+```text
+wrong_auto_attached_tags = 0
+manual_tags_preserved = true
+candidate_count_within_budget = true
+new_tag_sprawl_blocked = true
+raw_candidates_resolved_before_persist = true
+deprecated_merged_archived_not_auto_attached = true
+tag_filter_exact = true
+candidate_tags_not_search_filterable = true
+doctor_hard_findings = 0
+```
+
+**Not yet in this pass:** dedicated `indb tag run` / `indb tag candidates` CLI group with stable `--json` (legacy `taxonomy promote-tag` / `reject-tag` call the new review path for scoped candidates). TUI, consoler UI, retrieval packages, `ask`, real providers, embedding-backed taggers, hidden online learning, ontology management, project namespaces, automatic batch propagation, and destructive cleanup remain out of scope.
+
 ## Release gates and CI (current)
 
 **Canonical gate doc:** `docs/planning/v0.2-release-gate-checkpoint.md`
 
 | Layer | What | PR blocker on GitHub |
 | --- | --- | --- |
-| A | `pytest` (261 tests) | Yes |
+| A | `pytest` (306 collected) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |
@@ -183,8 +218,8 @@ Tag governance, retrieval packages, `ask`, real model providers, hidden online l
 
 ## Recommended reading order for new contributors
 
-1. `README.md` — install and first commands  
-2. `docs/architecture.md` — trust boundaries  
-3. `docs/project-status.md` (this file) — what is shipped  
-4. `docs/testing.md` — how quality is verified  
-5. Relevant v0.2 spec + `docs/agents/*/AGENT.md` before changing ingest or output  
+1. `README.md` — install and first commands
+2. `docs/architecture.md` — trust boundaries
+3. `docs/project-status.md` (this file) — what is shipped
+4. `docs/testing.md` — how quality is verified
+5. Relevant v0.2/v0.3 spec + `docs/agents/*/AGENT.md` before changing ingest, output, category, or tag behavior

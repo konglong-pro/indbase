@@ -426,6 +426,11 @@ def search(
         "--mode",
         help="Search mode: fts, vector, or hybrid.",
     ),
+    tag: str | None = typer.Option(
+        None,
+        "--tag",
+        help="Filter to documents with a trusted relation-backed tag assignment.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -433,7 +438,7 @@ def search(
     ),
 ) -> None:
     """Search current source chunks and render citation snippets."""
-    options = _search_options_for_vault(vault, top_k=top_k, mode=mode)
+    options = _search_options_for_vault(vault, top_k=top_k, mode=mode, tag=tag)
     with _existing_vault_connection(vault) as connection:
         try:
             result = search_chunks(connection, query, options=options)
@@ -1473,7 +1478,7 @@ def doc_list(
     tag: str | None = typer.Option(
         None,
         "--tag",
-        help="Filter by active manual tag name.",
+        help="Filter by trusted relation-backed tag (name, alias, or tag_id).",
     ),
     limit: int = typer.Option(
         50,
@@ -3302,16 +3307,29 @@ def _yes_no(value: object) -> str:
     return "yes" if bool(value) else "no"
 
 
-def _search_options_for_vault(vault_path: Path, *, top_k: int | None, mode: str = "fts") -> SearchOptions:
+def _search_options_for_vault(
+    vault_path: Path,
+    *,
+    top_k: int | None,
+    mode: str = "fts",
+    tag: str | None = None,
+) -> SearchOptions:
     config_path = vault_path / ".indbase" / "config" / "config.toml"
     search_config = load_config(config_path).search if config_path.is_file() else SearchConfig()
     options = SearchOptions.from_config(search_config)
+    tag_filter_ids = None
+    if tag is not None:
+        with connect(vault_path / ".indbase" / "db.sqlite") as connection:
+            from indbase_core.tag_search import resolve_tag_filter
+
+            tag_filter_ids = resolve_tag_filter(connection, tag).filter_tag_ids
     return SearchOptions(
         top_k=options.top_k if top_k is None else top_k,
         log_queries=options.log_queries,
         persist_search_results=options.persist_search_results,
         cjk_strategy=options.cjk_strategy,
         mode=mode,
+        tag_filter_ids=tag_filter_ids,
     )
 
 

@@ -101,6 +101,30 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
 
+  tag-governance-v032:
+    name: C2b — v0.3.2 tag governance gate
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: v0.3.2 tag governance release gate
+        run: uv run python scripts/v032_tag_governance_release_gate.py
+        env:
+          PYTHONIOENCODING: utf-8
+
   retrieval-v032:
     name: C3 — v0.3.2 retrieval release gate
     runs-on: ubuntu-latest

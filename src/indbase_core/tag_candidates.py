@@ -7,6 +7,12 @@ import json
 import sqlite3
 
 from indbase_core.ids import new_prefixed_id
+from indbase_core.tag_feedback import record_tag_feedback
+from indbase_core.tag_governance import record_tag_governance_event
+from indbase_core.tag_governance_review import (
+    accept_tag_governance_candidate,
+    reject_tag_governance_candidate,
+)
 from indbase_core.tags import add_tag, normalize_tag_name
 from indbase_core.taxonomy import validate_tag_type
 from indbase_core.time import utc_now_iso
@@ -62,9 +68,24 @@ def promote_tag_candidate(
     tag_type: str | None = None,
     promoted_by: str = "manual",
 ) -> TagCandidateChange:
-    row = _load_candidate(connection, candidate_id)
+    row = _load_governance_candidate(connection, candidate_id)
     if str(row["status"]) != "pending":
         raise ValueError(f"Tag candidate is not pending: {candidate_id}")
+
+    candidate_type = str(row["candidate_type"] or "").strip() or None
+    if row["doc_id"] is not None and candidate_type in {"attach_existing", "propose_new"}:
+        reviewed = accept_tag_governance_candidate(
+            connection,
+            candidate_id,
+            tag_type=tag_type,
+            created_by=promoted_by,
+        )
+        return TagCandidateChange(
+            candidate_id=candidate_id,
+            status=reviewed.status,
+            tag_id=reviewed.tag_id,
+            tag_name=reviewed.tag_name,
+        )
 
     clean_type = validate_tag_type(tag_type or str(row["type"]))
     type_override = clean_type != str(row["type"])
@@ -100,6 +121,22 @@ def promote_tag_candidate(
         """,
         (new_prefixed_id("tagevent"), tag_id, json.dumps(payload, ensure_ascii=False), promoted_by, now),
     )
+    feedback_id = record_tag_feedback(
+        connection,
+        "accepted",
+        tag_id=tag_id,
+        candidate_id=candidate_id,
+        new={"promoted_tag_id": tag_id, "legacy_promote_only": True},
+        created_by=promoted_by,
+    )
+    record_tag_governance_event(
+        connection,
+        "promoted",
+        tag_id=tag_id,
+        candidate_id=candidate_id,
+        payload={"legacy_promote_only": True, "feedback_id": feedback_id},
+        created_by=promoted_by,
+    )
     connection.commit()
     return TagCandidateChange(
         candidate_id=candidate_id,
@@ -114,21 +151,19 @@ def reject_tag_candidate(
     candidate_id: str,
     *,
     reason: str | None = None,
+    rejected_by: str = "manual",
 ) -> TagCandidateChange:
-    row = _load_candidate(connection, candidate_id)
-    if str(row["status"]) != "pending":
-        raise ValueError(f"Tag candidate is not pending: {candidate_id}")
-    now = utc_now_iso()
-    connection.execute(
-        """
-        UPDATE tag_candidates
-        SET status = 'rejected', updated_at = ?
-        WHERE candidate_id = ?
-        """,
-        (now, candidate_id),
+    reviewed = reject_tag_governance_candidate(
+        connection,
+        candidate_id,
+        reason=reason,
+        created_by=rejected_by,
     )
-    connection.commit()
-    return TagCandidateChange(candidate_id=candidate_id, status="rejected", tag_name=str(row["name"]))
+    return TagCandidateChange(
+        candidate_id=candidate_id,
+        status=reviewed.status,
+        tag_name=reviewed.tag_name,
+    )
 
 
 def record_missing_tag_candidate(
@@ -201,9 +236,14 @@ def record_missing_tag_candidate(
 
 
 def _load_candidate(connection: sqlite3.Connection, candidate_id: str) -> sqlite3.Row:
+    return _load_governance_candidate(connection, candidate_id)
+
+
+def _load_governance_candidate(connection: sqlite3.Connection, candidate_id: str) -> sqlite3.Row:
     row = connection.execute(
         """
-        SELECT candidate_id, name, normalized_name, type, status, promoted_tag_id
+        SELECT candidate_id, name, normalized_name, type, status, promoted_tag_id,
+               candidate_type, doc_id, revision_id, target_tag_id, proposed_name, raw_name
         FROM tag_candidates
         WHERE candidate_id = ?
         """,

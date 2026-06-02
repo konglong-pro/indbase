@@ -20,6 +20,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0008_v031_taxonomy_category_foundation",
         "0009_retrieval_intelligence",
         "0010_retrieval_evaluation",
+        "0011_v032_tag_governance_foundation",
     ]
 
     connection = connect(db_path)
@@ -57,6 +58,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0008_v031_taxonomy_category_foundation",
             "0009_retrieval_intelligence",
             "0010_retrieval_evaluation",
+            "0011_v032_tag_governance_foundation",
         ]
         assert "category_profiles" in tables
         assert "category_classification_runs" in tables

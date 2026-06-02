@@ -8,6 +8,8 @@ import sqlite3
 
 from indbase_core.ids import new_prefixed_id
 from indbase_core.indexer import refresh_document_fts_metadata
+from indbase_core.tag_feedback import record_tag_feedback
+from indbase_core.tag_governance import record_tag_governance_event
 from indbase_core.tags import archive_tag, normalize_tag_name
 from indbase_core.time import utc_now_iso
 
@@ -92,6 +94,20 @@ def add_tag_alias(
             created_by,
             now,
         ),
+    )
+    record_tag_feedback(
+        connection,
+        "alias_added",
+        tag_id=tag_id,
+        new={"alias": clean_alias},
+        created_by=created_by,
+    )
+    record_tag_governance_event(
+        connection,
+        "alias_added",
+        tag_id=tag_id,
+        payload={"alias": clean_alias},
+        created_by=created_by,
     )
     connection.commit()
     return TagMutationResult(tag_id=tag_id, changed=changed, detail=clean_alias)
@@ -179,6 +195,20 @@ def merge_tags(
             now,
         ),
     )
+    record_tag_feedback(
+        connection,
+        "merged",
+        tag_id=source_tag_id,
+        new={"target_tag_id": target_tag_id},
+        created_by=created_by,
+    )
+    record_tag_governance_event(
+        connection,
+        "merged",
+        tag_id=source_tag_id,
+        payload={"target_tag_id": target_tag_id},
+        created_by=created_by,
+    )
     connection.commit()
     return TagMutationResult(tag_id=source_tag_id, changed=True, detail=f"merged into {target_tag_id}")
 
@@ -202,6 +232,18 @@ def deprecate_tag(connection: sqlite3.Connection, tag_id: str, *, created_by: st
         VALUES (?, ?, 'deprecated', ?, ?)
         """,
         (new_prefixed_id("tagevent"), tag_id, created_by, now),
+    )
+    record_tag_feedback(
+        connection,
+        "deprecated",
+        tag_id=tag_id,
+        created_by=created_by,
+    )
+    record_tag_governance_event(
+        connection,
+        "deprecated",
+        tag_id=tag_id,
+        created_by=created_by,
     )
     connection.commit()
     return TagMutationResult(tag_id=tag_id, changed=True, detail=str(row["name"]))

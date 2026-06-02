@@ -195,6 +195,7 @@ def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
             findings.extend(_check_output_run_integrity(connection, vault_root))
             findings.extend(_check_review_queue(connection))
             findings.extend(_check_taxonomy_integrity(connection))
+            findings.extend(_check_tag_governance_integrity(connection))
             findings.extend(_check_retrieval_integrity(connection))
             findings.extend(_check_retrieval_evaluation_integrity(connection))
         finally:
@@ -2603,6 +2604,165 @@ def _check_taxonomy_integrity(connection: sqlite3.Connection) -> list[DoctorFind
                 "error",
                 "taxonomy_suggestion_invalid_tag",
                 f"Taxonomy suggestion {row['suggestion_id']} targets missing tag {row['tag_id']}.",
+            )
+        )
+
+    return findings
+
+
+def _tag_governance_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'tagger_runs'
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _check_tag_governance_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _tag_governance_schema_ready(connection):
+        return []
+
+    findings: list[DoctorFinding] = []
+
+    alias_missing_tag = connection.execute(
+        """
+        SELECT ta.alias_id, ta.alias
+        FROM tag_aliases ta
+        LEFT JOIN tags t ON t.tag_id = ta.tag_id
+        WHERE ta.deleted_at IS NULL
+          AND t.tag_id IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in alias_missing_tag:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_alias_points_missing_tag",
+                f"Alias {row['alias_id']} ({row['alias']}) points to a missing tag.",
+            )
+        )
+
+    merged_target_missing = connection.execute(
+        """
+        SELECT tag_id, name, merged_into_tag_id
+        FROM tags
+        WHERE deleted_at IS NULL
+          AND merged_into_tag_id IS NOT NULL
+          AND merged_into_tag_id NOT IN (
+            SELECT tag_id FROM tags WHERE deleted_at IS NULL
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in merged_target_missing:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_merged_target_missing",
+                f"Tag {row['tag_id']} ({row['name']}) merges into missing tag {row['merged_into_tag_id']}.",
+            )
+        )
+
+    auto_without_evidence = connection.execute(
+        """
+        SELECT dt.doc_id, dt.tag_id
+        FROM document_tags dt
+        WHERE dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND dt.source = 'auto'
+          AND (
+            dt.evidence_chunk_ids_json IS NULL
+            OR TRIM(dt.evidence_chunk_ids_json) IN ('', '[]')
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in auto_without_evidence:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "auto_attached_tag_without_evidence",
+                f"Auto-attached tag {row['tag_id']} on {row['doc_id']} lacks evidence chunks.",
+            )
+        )
+
+    auto_inactive_tag = connection.execute(
+        """
+        SELECT dt.doc_id, dt.tag_id, t.status AS tag_status
+        FROM document_tags dt
+        JOIN tags t ON t.tag_id = dt.tag_id
+        WHERE dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND dt.source = 'auto'
+          AND t.status IN ('deprecated', 'archived', 'merged')
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in auto_inactive_tag:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "auto_attached_deprecated_or_archived",
+                f"Auto-attached tag {row['tag_id']} on {row['doc_id']} is {row['tag_status']}.",
+            )
+        )
+
+    pending_without_resolution = connection.execute(
+        """
+        SELECT candidate_id, name
+        FROM tag_candidates
+        WHERE status = 'pending'
+          AND candidate_type IS NOT NULL
+          AND (resolution_status IS NULL OR TRIM(resolution_status) = '')
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in pending_without_resolution:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_candidate_without_resolution",
+                f"Governance candidate {row['candidate_id']} ({row['name']}) lacks resolution_status.",
+            )
+        )
+
+    candidate_missing_run = connection.execute(
+        """
+        SELECT candidate_id
+        FROM tag_candidates
+        WHERE tagger_run_id IS NOT NULL
+          AND tagger_run_id NOT IN (SELECT tagger_run_id FROM tagger_runs)
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in candidate_missing_run:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_candidate_missing_run",
+                f"Tag candidate {row['candidate_id']} references a missing tagger run.",
+            )
+        )
+
+    formal_count = connection.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM tags
+        WHERE deleted_at IS NULL
+          AND status = 'active'
+        """
+    ).fetchone()["count"]
+    if int(formal_count or 0) > 500:
+        findings.append(
+            DoctorFinding(
+                "warning",
+                "formal_tag_soft_limit_exceeded",
+                f"Active formal tag count {formal_count} exceeds the soft limit of 500.",
             )
         )
 

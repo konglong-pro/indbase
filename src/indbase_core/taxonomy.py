@@ -22,7 +22,15 @@ ALIAS_STATUSES: frozenset[str] = frozenset({"active", "deprecated", "blocked"})
 ASSIGNABLE_TAG_STATUSES: frozenset[str] = frozenset({"active"})
 
 DOCUMENT_TAG_SOURCES: frozenset[str] = frozenset(
-    {"manual", "deterministic", "llm_suggestion", "accepted_suggestion"}
+    {
+        "manual",
+        "deterministic",
+        "llm_suggestion",
+        "accepted_suggestion",
+        "auto",
+        "accepted_candidate",
+        "legacy_classification",
+    }
 )
 
 DOCUMENT_TAG_STATUSES: frozenset[str] = frozenset({"active", "removed"})

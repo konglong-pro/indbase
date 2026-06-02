@@ -1,6 +1,6 @@
 # Testing and Release Verification
 
-**As of:** 2026-06-01
+**As of:** 2026-06-02
 
 This document is the **canonical summary of what is tested and what must pass** for day-to-day development and release. For delivery scope see [project-status.md](project-status.md). For gate policy see [planning/v0.2-release-gate-checkpoint.md](planning/v0.2-release-gate-checkpoint.md).
 
@@ -19,6 +19,9 @@ uv run python scripts/doctor_negative_gate.py
 # v0.3.1 category foundation (when touching taxonomy)
 uv run python scripts/v031_taxonomy_category_release_gate.py
 
+# v0.3.2 tag governance foundation (when touching tag governance)
+uv run python scripts/v032_tag_governance_release_gate.py
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -34,6 +37,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | D — real swallow smoke | D | `INDBASE_SWALLOW_SMOKE=1`, `uv sync --extra swallow` |
 | D — real Node transition smoke | D | `INDBASE_TRANSITION_SMOKE=1`, Node 20 |
 | v0.3.1 — taxonomy category gate | v0.3.1 | `scripts/v031_taxonomy_category_release_gate.py` |
+| C2b — v0.3.2 tag governance gate | v0.3.2 | `scripts/v032_tag_governance_release_gate.py` |
 | retired template guard | guard | no `minimal` template in `scripts/`, `README.md`, `docs/development.md` |
 
 Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/workflows/release-dogfood.yml) — manual or weekly; uses `tests/fixtures/v02_dogfood_corpus/` or repo variable `INDB_REAL_CORPUS`.
@@ -42,7 +46,7 @@ Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/
 
 ## Pytest suite (layer A)
 
-**Total:** 261 tests in `tests/` (collected with `python -m pytest --collect-only`).
+**Total:** 306 tests collected in `tests/` (`uv run python -m pytest --collect-only`; 2 deselected by default markers when running the full suite).
 
 Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["tests"]`, `pythonpath = ["src"]`).
 
@@ -89,6 +93,8 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `test_db.py` | 2 | Migrations applied |
 | `test_vault.py` | 2 | Init layout, `indbase_default_v1` template |
 | `test_v031_category_taxonomy.py` | 8 | v0.3.1 profiles, classifier, search filter, post-ingest taxonomy |
+| `test_v032_tag_governance.py` | 22 | v0.3.2 migration, resolution, tagger, accept/reject, relation-backed tag filter |
+| `test_v032_post_ingest_tagging.py` | 2 | Post-ingest tag governance feature flags |
 | `test_revisions.py` | 2 | Immutable revision files |
 | `test_documents.py` | 2 | Document metadata |
 | `test_ids.py` | 3 | ID formats |
@@ -119,6 +125,7 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v02_real_corpus_dogfood_gate.py` | E | Folder ingest + doctor hard = 0 on real/staged corpus |
 | `v02_release_gate.py` | A–E aggregate | All required layers; D/E per env |
 | `v031_taxonomy_category_release_gate.py` | v0.3.1 | Fixture classifier: zero wrong confident assignments; manual preserve; doctor hard = 0 |
+| `v032_tag_governance_release_gate.py` | v0.3.2 | Fixture tagger: zero wrong auto-attaches; tag filter exact; candidates not filterable; scoped doctor hard = 0 |
 
 Shared helpers: `scripts/gate_common.py`.
 
@@ -151,11 +158,13 @@ uv run python scripts/v02_transition_smoke_gate.py
 ## What passing means (release bar)
 
 ```text
-261/261 pytest passed
+306 collected / 304 passed (2 skipped by default markers)
 compileall clean
 v02 deterministic gate passed
 doctor negative gate passed
-GitHub CI green (A–D on ubuntu-latest)
+v031 taxonomy category gate passed (when touching taxonomy)
+v032 tag governance gate passed (when touching tag governance)
+GitHub CI green (A–D + v0.3.1/v0.3.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```
 
