@@ -14,6 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from gate_common import TAG_GOVERNANCE_DOCTOR_CODES
+
 from indbase_core.db import connect
 from indbase_core.doctor import run_doctor
 from indbase_core.tag_blocklist import add_blocklist_entry
@@ -202,26 +204,10 @@ def main() -> int:
                             metrics.candidate_tags_not_search_filterable = False
 
         report = run_doctor(vault)
-        tag_governance_codes = {
-            "tag_alias_points_missing_tag",
-            "tag_alias_duplicate_normalized",
-            "tag_merged_target_missing",
-            "tag_merge_cycle",
-            "document_tag_points_missing_tag",
-            "document_tag_points_missing_doc",
-            "tag_candidate_missing_run",
-            "tag_candidate_invalid_json",
-            "tag_candidate_without_resolution",
-            "auto_attached_tag_without_evidence",
-            "auto_attached_deprecated_or_archived",
-            "tag_filter_metadata_stale",
-            "tag_governance_event_missing",
-            "tag_blocklist_invalid_pattern",
-        }
         metrics.doctor_hard_findings = sum(
             1
             for finding in report.findings
-            if finding.severity == "error" and finding.code in tag_governance_codes
+            if finding.severity == "error" and finding.code in TAG_GOVERNANCE_DOCTOR_CODES
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

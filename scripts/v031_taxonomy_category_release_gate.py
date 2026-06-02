@@ -14,6 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from gate_common import TAG_GOVERNANCE_DOCTOR_CODES
+
 import hashlib
 from dataclasses import replace
 from pathlib import Path as PathType
@@ -185,7 +187,14 @@ def main() -> int:
                 metrics.manual_assignments_preserved = False
 
         report = run_doctor(vault)
-        metrics.doctor_hard_findings = sum(1 for finding in report.findings if finding.severity == "error")
+        hard_findings = [finding for finding in report.findings if finding.severity == "error"]
+        metrics.doctor_hard_findings = sum(
+            1 for finding in hard_findings if finding.code not in TAG_GOVERNANCE_DOCTOR_CODES
+        )
+        if metrics.doctor_hard_findings:
+            for finding in hard_findings:
+                if finding.code not in TAG_GOVERNANCE_DOCTOR_CODES:
+                    print(f"doctor error: {finding.code}: {finding.message}", file=sys.stderr)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -31,6 +31,25 @@ TRUSTED_MARKDOWN = (
 
 SHORT_MARKDOWN = f"# Short Review Fixture\n\nBrief. {REVIEW_NEEDLE}\n"
 
+TAG_GOVERNANCE_DOCTOR_CODES = frozenset(
+    {
+        "tag_alias_points_missing_tag",
+        "tag_alias_duplicate_normalized",
+        "tag_merged_target_missing",
+        "tag_merge_cycle",
+        "document_tag_points_missing_tag",
+        "document_tag_points_missing_doc",
+        "tag_candidate_missing_run",
+        "tag_candidate_invalid_json",
+        "tag_candidate_without_resolution",
+        "auto_attached_tag_without_evidence",
+        "auto_attached_deprecated_or_archived",
+        "tag_filter_metadata_stale",
+        "tag_governance_event_missing",
+        "tag_blocklist_invalid_pattern",
+    }
+)
+
 
 def run_pytest_gate() -> dict[str, object]:
     completed = subprocess.run(
