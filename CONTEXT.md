@@ -116,6 +116,38 @@ _Avoid_: category foundation result, trusted run result
 The separate workflow for controlling formal tags, candidate tags, aliases, merges, deprecations, and tag volume.
 _Avoid_: big category classification
 
+**Formal Tag**:
+A user-approved tag that is allowed to appear in document metadata, tag filters, and trusted search metadata.
+_Avoid_: candidate tag, raw model tag, unreviewed tag
+
+**Canonical Tag**:
+The active **Formal Tag** that represents a normalized concept after alias or merge resolution.
+_Avoid_: alias, duplicate tag, display spelling
+
+**Deprecated Tag**:
+A **Formal Tag** that remains attached to historical documents but should not be newly suggested or attached automatically.
+_Avoid_: deleted tag, active tag
+
+**Merged Tag**:
+A **Formal Tag** that has been redirected into a **Canonical Tag** because it duplicates or overlaps another tag.
+_Avoid_: alias only, archived tag
+
+**Archived Tag**:
+A **Formal Tag** hidden from normal lists, filters, and automatic tagging without deleting historical records.
+_Avoid_: physically deleted tag
+
+**Candidate Tag**:
+A proposed tag from an agent, harness, or review workflow that has not yet been promoted into trusted document metadata.
+_Avoid_: formal tag, applied tag, accepted tag
+
+**Tag Promotion**:
+The explicit workflow that turns a **Candidate Tag** into a **Formal Tag** or links it to an existing **Formal Tag**.
+_Avoid_: automatic tag creation, hidden training
+
+**Tag Volume Budget**:
+A governance limit that controls how many tags may be suggested, promoted, or attached so the tag system does not fragment into overly specific labels.
+_Avoid_: unlimited tagging, tag sprawl
+
 **Category Search Filter**:
 A search constraint that returns only documents assigned to a selected **Big Category**.
 _Avoid_: tag filter, full-text category mention
@@ -169,6 +201,12 @@ _Avoid_: top score only
 - A **Classification Run** contains one or more **Classification Results**.
 - **Category Feedback** is explicit input for future review and evaluation, not hidden online learning.
 - **Tag Governance** is separate from **Big Category** classification; tags may provide context but are not governed in the category foundation phase.
+- A **Formal Tag** is trusted metadata; a **Candidate Tag** is reviewable evidence and must not be treated as applied metadata.
+- A **Formal Tag** is multi-select document metadata, unlike the single-select **Big Category**.
+- A **Canonical Tag** is the target used after resolving aliases and merges.
+- **Deprecated Tags**, **Merged Tags**, and **Archived Tags** preserve history without participating in new automatic tagging.
+- Automatic tag workflows may use existing **Formal Tags** or propose **Candidate Tags**, but they must not create new **Formal Tags** without **Tag Promotion**.
+- A **Tag Volume Budget** prevents tag suggestions and promotions from producing tag sprawl.
 - **Category Search Filter** belongs to the category foundation phase; tag-aware search belongs to **Tag Governance**.
 - A **Taxonomy Execution Error** is an issue; an intentional **Abstain** is a valid classification outcome.
 - The **Post-Ingest Taxonomy Stage** may classify or abstain after ingest, but it must not roll back trusted source ingestion.
@@ -206,6 +244,9 @@ _Avoid_: top score only
 
 > **Dev:** "If two categories score almost the same, should we still pick the top one?"
 > **Domain expert:** "No. Low **Classification Margin** means the classifier should **Abstain** or request review."
+
+> **Dev:** "Can an automatic tagger create a new tag and attach it immediately?"
+> **Domain expert:** "No. It may attach existing **Formal Tags** when rules allow, or create **Candidate Tags** for review and **Tag Promotion**."
 
 ## Flagged Ambiguities
 

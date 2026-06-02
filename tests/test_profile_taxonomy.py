@@ -14,7 +14,7 @@ from indbase_core.vault import init_vault
 
 def test_profile_build_rejects_source_shell(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         now = "2026-05-20T00:00:00+00:00"
         connection.execute(
@@ -40,7 +40,7 @@ def test_profile_build_and_taxonomy_analyze(tmp_path: Path) -> None:
         "The rag workflow helps knowledge base design.\n",
         encoding="utf-8",
     )
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -83,7 +83,7 @@ def test_profile_build_and_taxonomy_analyze(tmp_path: Path) -> None:
 
 def test_feature_quote_must_be_chunk_substring(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     chunk_text = "SQLite FTS indexes current source chunks for hybrid search."
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         connection.row_factory = sqlite3.Row
@@ -145,7 +145,7 @@ def test_profile_stale_after_revision_change(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     source = tmp_path / "note.md"
     source.write_text("# Note\nfirst version\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         doc_id = connection.execute("SELECT doc_id FROM documents").fetchone()["doc_id"]

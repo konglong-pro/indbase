@@ -33,7 +33,7 @@ def main() -> None:
         encoding="utf-8",
     )
     install_deterministic_swallow_stub()
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     configure_v02_vault(vault, swallow_ingest=True, transition_output=False, min_markdown_chars=80)
     result = run_m3_ingest_pipeline(vault, source)
     if result.written_revisions < 1:

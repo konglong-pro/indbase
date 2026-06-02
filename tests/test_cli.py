@@ -709,7 +709,10 @@ def test_cli_manual_category_and_tag_commands_do_not_mutate_revisions(tmp_path) 
         app,
         ["doc", "set-category", doc_id, category_id, "--vault", str(vault_path)],
     )
-    tag_add_result = runner.invoke(app, ["tag", "add", "important", "--vault", str(vault_path)])
+    tag_add_result = runner.invoke(
+        app,
+        ["tag", "add", "important", "--type", "topic", "--vault", str(vault_path)],
+    )
     tag_list_result = runner.invoke(app, ["tag", "list", "--vault", str(vault_path)])
     doc_add_tag_result = runner.invoke(app, ["doc", "add-tag", doc_id, "important", "--vault", str(vault_path)])
     doc_tags_result = runner.invoke(app, ["doc", "tags", doc_id, "--vault", str(vault_path)])
@@ -768,7 +771,7 @@ def test_cli_m5_category_and_tag_crud_is_non_destructive(tmp_path) -> None:
     init_result = runner.invoke(app, ["init", str(vault_path)])
     ingest_result = runner.invoke(app, ["ingest", str(source), "--vault", str(vault_path)])
     category_add = runner.invoke(app, ["catalog", "add", "Scratch", "--vault", str(vault_path)])
-    tag_add = runner.invoke(app, ["tag", "add", "alpha", "--vault", str(vault_path)])
+    tag_add = runner.invoke(app, ["tag", "add", "alpha", "--type", "topic", "--vault", str(vault_path)])
 
     connection = connect(vault_path / ".indbase" / "db.sqlite")
     try:
@@ -964,6 +967,10 @@ def test_cli_doc_list_filters_status_category_and_tag(tmp_path) -> None:
         connection.close()
 
     set_category = runner.invoke(app, ["doc", "set-category", doc_id, category_id, "--vault", str(vault_path)])
+    tag_create = runner.invoke(
+        app,
+        ["tag", "add", "m5-visible", "--type", "topic", "--vault", str(vault_path)],
+    )
     add_tag = runner.invoke(app, ["doc", "add-tag", doc_id, "m5-visible", "--vault", str(vault_path)])
     active_list = runner.invoke(app, ["doc", "list", "--vault", str(vault_path)])
     category_list = runner.invoke(
@@ -987,6 +994,7 @@ def test_cli_doc_list_filters_status_category_and_tag(tmp_path) -> None:
     assert ingest_result.exit_code == 0
     assert category_add.exit_code == 0
     assert set_category.exit_code == 0
+    assert tag_create.exit_code == 0
     assert add_tag.exit_code == 0
     assert active_list.exit_code == 0
     assert stable_active_line in active_list.output

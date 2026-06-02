@@ -268,15 +268,21 @@ def _accept_category_assign(
 
     category_changed = False
     if can_replace and old_category != category_id:
-        result = set_document_category(
-            connection,
-            doc_id,
-            category_id,
-            category_source="accepted_suggestion",
-            category_suggestion_id=str(row["suggestion_id"]),
-            category_updated_by="taxonomy",
-        )
+        result = set_document_category(connection, doc_id, category_id)
         category_changed = result.changed
+        now = utc_now_iso()
+        connection.execute(
+            """
+            UPDATE documents
+            SET category_source = 'accepted_suggestion',
+                category_suggestion_id = ?,
+                category_updated_by = 'taxonomy',
+                updated_at = ?
+            WHERE doc_id = ?
+              AND deleted_at IS NULL
+            """,
+            (str(row["suggestion_id"]), now, doc_id),
+        )
 
     now = utc_now_iso()
     connection.execute(

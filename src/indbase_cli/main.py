@@ -230,7 +230,7 @@ def init(
         help="Vault directory to create or initialize.",
     ),
     category_template: str = typer.Option(
-        "minimal",
+        "indbase_default_v1",
         "--category-template",
         help=f"Category template: {', '.join(template_names())}.",
     ),
@@ -926,7 +926,7 @@ def tui(
         help="Maximum rows/results to show.",
     ),
     category_template: str = typer.Option(
-        "minimal",
+        "indbase_default_v1",
         "--category-template",
         help=f"Category template for --action init: {', '.join(template_names())}.",
     ),

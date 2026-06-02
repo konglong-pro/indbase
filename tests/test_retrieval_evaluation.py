@@ -42,7 +42,7 @@ def _ingest_index(vault: Path, source: Path) -> str:
 
 def _vault_with_rag_doc(tmp_path: Path) -> tuple[Path, str]:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     source = tmp_path / "primary.md"
     source.write_text(
         "# AI\n\n"
@@ -182,7 +182,7 @@ def test_eval_expected_doc_missing_fails(tmp_path: Path) -> None:
 
 def test_readiness_zero_items_not_ready(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         result = retrieve_chunks(connection, "category:计算机科学", top_k=5, mode="fts")
         report = assess_answer_readiness(connection, result.retrieval_run_id)

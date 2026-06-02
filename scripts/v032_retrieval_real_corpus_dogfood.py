@@ -198,7 +198,7 @@ def main() -> None:
     _inject_needle(sources)
 
     vault = root / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     configure_v02_vault(vault, swallow_ingest=True, transition_output=False, min_markdown_chars=80)
     ingest = run_m3_ingest_pipeline(vault, sources, recursive=True)
 

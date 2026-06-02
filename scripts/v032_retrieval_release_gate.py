@@ -34,7 +34,7 @@ def main() -> None:
     root.mkdir(parents=True)
     install_deterministic_swallow_stub()
     vault = root / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
 
     primary = root / "primary.md"
     primary.write_text(

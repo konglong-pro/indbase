@@ -461,13 +461,17 @@ def _resolve_category_filter(connection: sqlite3.Connection, raw_value: str) -> 
     normalized = raw_value.casefold().strip()
     rows = connection.execute(
         """
-        SELECT category_id, name
-        FROM categories
-        WHERE is_active = 1
-          AND deleted_at IS NULL
-          AND lower(name) = ?
+        SELECT DISTINCT c.category_id, c.name
+        FROM categories c
+        LEFT JOIN category_localizations cl ON cl.category_id = c.category_id
+        WHERE c.is_active = 1
+          AND c.deleted_at IS NULL
+          AND (
+            lower(c.name) = ?
+            OR lower(COALESCE(cl.label, '')) = ?
+          )
         """,
-        (normalized,),
+        (normalized, normalized),
     ).fetchall()
     if not rows:
         raise ValueError(f"Active category not found: {raw_value}")

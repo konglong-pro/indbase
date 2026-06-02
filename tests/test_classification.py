@@ -17,7 +17,7 @@ from indbase_core.documents import archive_document, set_document_category
 from indbase_core.ingest import run_m3_ingest_pipeline
 from indbase_core.ocr import run_ocr_for_document
 from indbase_core.search import search_chunks
-from indbase_core.tags import list_document_tags
+from indbase_core.tags import add_tag, list_document_tags
 from indbase_core.vault import init_vault
 
 
@@ -67,6 +67,7 @@ def test_classification_accept_applies_explicit_metadata_and_records_feedback(tm
         category_id = "cat_computer_science"
         suggest_classifications(connection)
         suggestion_id = connection.execute("SELECT suggestion_id FROM classification_suggestions").fetchone()[0]
+        add_tag(connection, "rag", tag_type="method")
         result = accept_classification_suggestion(connection, suggestion_id, reason="accepted in test")
         doc_id = result.doc_id
         document = connection.execute(
@@ -167,10 +168,13 @@ def test_cli_classification_suggest_list_accept_json(tmp_path) -> None:
     assert runner.invoke(app, ["catalog", "add", "AI Research", "--vault", str(vault)]).exit_code == 0
     assert runner.invoke(app, ["ingest", str(source), "--vault", str(vault)]).exit_code == 0
 
-    suggest = runner.invoke(app, ["classify", "suggest", "--vault", str(vault), "--json"])
-    listed = runner.invoke(app, ["classify", "list", "--vault", str(vault), "--json"])
+    suggest = runner.invoke(app, ["classify", "suggest", "--vault", str(vault), "--legacy", "--json"])
+    listed = runner.invoke(app, ["classify", "list", "--vault", str(vault), "--legacy", "--json"])
     suggestion_id = json.loads(listed.output)["suggestions"][0]["suggestion_id"]
-    accepted = runner.invoke(app, ["classify", "accept", suggestion_id, "--vault", str(vault), "--json"])
+    accepted = runner.invoke(
+        app,
+        ["classify", "accept", suggestion_id, "--vault", str(vault), "--legacy", "--json"],
+    )
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         feedback_count = connection.execute("SELECT COUNT(*) AS count FROM classification_feedback").fetchone()["count"]
@@ -388,6 +392,8 @@ def test_classification_accept_deduplicates_normalized_tags(tmp_path) -> None:
             "UPDATE classification_suggestions SET suggested_tags_json = ? WHERE suggestion_id = ?",
             (json.dumps(["LLM", "llm", "large language model"]), suggestion_id),
         )
+        add_tag(connection, "LLM", tag_type="topic")
+        add_tag(connection, "large language model", tag_type="topic")
         result = accept_classification_suggestion(connection, suggestion_id)
         llm_tags = connection.execute(
             "SELECT COUNT(*) AS count FROM tags WHERE normalized_name = 'llm'"

@@ -19,7 +19,7 @@ def test_harness_logs_model_calls_and_rejects_invalid_schema(tmp_path: Path) -> 
     vault = tmp_path / "vault"
     source = tmp_path / "note.md"
     source.write_text("# Note\nSQLite FTS and hybrid search in this document body.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -71,7 +71,7 @@ def test_harness_logs_model_calls_and_rejects_invalid_schema(tmp_path: Path) -> 
 
 def test_harness_rejects_quote_not_in_chunk(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         now = "2026-05-20T00:00:00+00:00"
         connection.execute(

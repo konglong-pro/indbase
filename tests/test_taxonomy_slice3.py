@@ -19,7 +19,7 @@ def test_classify_suggest_requires_profile(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     source = tmp_path / "note.md"
     source.write_text("# Note\nsome content\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -35,7 +35,7 @@ def test_category_suggest_and_accept_writes_provenance(tmp_path: Path) -> None:
         "# AI Research\n\nAI research uses LLM RAG and SQLite FTS database patterns.\n",
         encoding="utf-8",
     )
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -68,7 +68,7 @@ def test_legacy_accept_routes_missing_tags_to_candidates(tmp_path: Path) -> None
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     from indbase_core.categories import add_category
@@ -92,7 +92,7 @@ def test_legacy_accept_routes_missing_tags_to_candidates(tmp_path: Path) -> None
 
 def test_promote_tag_candidate_creates_formal_tag(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         now = "2026-05-20T00:00:00+00:00"
         connection.execute(
@@ -125,7 +125,7 @@ def test_promote_tag_candidate_creates_formal_tag(tmp_path: Path) -> None:
 
 def test_janitor_audit_does_not_mutate_tags(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         before = connection.execute("SELECT COUNT(*) AS count FROM tags").fetchone()["count"]
         report = run_taxonomy_audit(connection)
@@ -139,7 +139,7 @@ def test_janitor_audit_does_not_mutate_tags(tmp_path: Path) -> None:
 def test_cli_taxonomy_audit_json(tmp_path: Path) -> None:
     runner = CliRunner()
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     result = runner.invoke(app, ["taxonomy", "audit", "--vault", str(vault), "--json"])
     assert result.exit_code == 0
     assert "findings" in result.output

@@ -125,8 +125,8 @@ def _ingest_index(vault: Path, source: Path) -> str:
 
 def test_parse_explicit_filters_and_ambiguity(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
-    parsed = parse_retrieval_query('tag:rag category:工作 hybrid search')
+    init_vault(vault, category_template="indbase_default_v1")
+    parsed = parse_retrieval_query("tag:rag category:cat_projects_work hybrid search")
     assert parsed.normalized_query_text == "hybrid search"
     assert len(parsed.explicit_filters) == 2
 
@@ -135,12 +135,12 @@ def test_parse_explicit_filters_and_ambiguity(tmp_path: Path) -> None:
         resolved = resolve_explicit_filters(connection, parsed.explicit_filters[:1])
         assert resolved.tags[0].tag_id.startswith("tag_")
         resolved_cat = resolve_explicit_filters(connection, (parsed.explicit_filters[1],))
-        assert resolved_cat.categories[0].category_id == "cat_work"
+        assert resolved_cat.categories[0].category_id == "cat_projects_work"
 
 
 def test_retrieve_persists_exact_quotes_without_side_effects(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     source = tmp_path / "ai-note.md"
     source.write_text(
         "# AI Research\n\nAI research uses LLM RAG retrieval augmented generation and SQLite FTS.\n",
@@ -173,7 +173,7 @@ def test_retrieve_persists_exact_quotes_without_side_effects(tmp_path: Path) -> 
 
 def test_explicit_tag_filter_hard_limits_results(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     a = tmp_path / "a.md"
     b = tmp_path / "b.md"
     a.write_text("# A\nshared retrieval keyword alpha\n", encoding="utf-8")
@@ -247,7 +247,7 @@ def test_cli_retrieve_and_retrieval_show_json(tmp_path: Path) -> None:
 
 def test_ranking_scores_decompose_and_reasons_are_explainable(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     source = tmp_path / "ranked.md"
     source.write_text(
         "# Ranked Doc\n\n"
@@ -285,7 +285,7 @@ def test_ranking_scores_decompose_and_reasons_are_explainable(tmp_path: Path) ->
 
 def test_filter_only_category_query_fails_without_search_text(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         parsed = parse_retrieval_query("category:计算机科学")
         assert parsed.normalized_query_text == ""
@@ -313,7 +313,7 @@ def test_unassigned_tag_filter_fails_while_baseline_succeeds(tmp_path: Path) -> 
 
 def test_category_filter_with_free_text_respects_hard_filter(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     cs = tmp_path / "cs.md"
     other = tmp_path / "other.md"
     cs.write_text("# CS\nhybrid search retrieval in computer science lane\n", encoding="utf-8")
@@ -336,7 +336,7 @@ def test_category_filter_with_free_text_respects_hard_filter(tmp_path: Path) -> 
 
 def test_ambiguous_category_filter_raises_actionable_error(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     now = utc_now_iso()
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         connection.execute(
@@ -409,7 +409,7 @@ def test_quote_fallback_still_substring_when_terms_missing(tmp_path: Path) -> No
 def test_cli_retrieve_json_exit_code_reflects_failed_filter_run(tmp_path: Path) -> None:
     runner = CliRunner()
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     result = runner.invoke(
         app,
         ["retrieve", "category:计算机科学", "--vault", str(vault), "--mode", "fts", "--json"],

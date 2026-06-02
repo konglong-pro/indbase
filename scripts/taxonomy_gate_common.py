@@ -60,7 +60,7 @@ def build_profiled_vault(root: Path) -> dict[str, str]:
     vault = root / "vault"
     source = root / "ai-research.md"
     source.write_text(AI_SOURCE_TEXT, encoding="utf-8")
-    init_vault(vault, category_template="academic")
+    init_vault(vault, category_template="indbase_default_v1")
     ingest_gate_source(vault, source)
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         doc_id = _doc_id_for_source(connection, source)

@@ -133,22 +133,15 @@ def test_set_document_category_writes_provenance(tmp_path: Path) -> None:
             (now,),
         )
         connection.commit()
-        set_document_category(
-            connection,
-            "doc_20260520_ab12cd",
-            "cat_test",
-            category_source="manual",
-            category_updated_by="test-user",
-        )
+        set_document_category(connection, "doc_20260520_ab12cd", "cat_test")
         row = connection.execute(
             """
-            SELECT category_id, category_source, category_updated_by, category_updated_at
+            SELECT category_id, classification_status, updated_at
             FROM documents
             WHERE doc_id = 'doc_20260520_ab12cd'
             """
         ).fetchone()
 
     assert row["category_id"] == "cat_test"
-    assert row["category_source"] == "manual"
-    assert row["category_updated_by"] == "test-user"
-    assert row["category_updated_at"] is not None
+    assert row["classification_status"] == "manual"
+    assert row["updated_at"] is not None
