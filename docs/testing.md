@@ -1,6 +1,6 @@
 # Testing and Release Verification
 
-**As of:** 2026-05-20
+**As of:** 2026-06-01
 
 This document is the **canonical summary of what is tested and what must pass** for day-to-day development and release. For delivery scope see [project-status.md](project-status.md). For gate policy see [planning/v0.2-release-gate-checkpoint.md](planning/v0.2-release-gate-checkpoint.md).
 
@@ -16,20 +16,8 @@ uv run python -m compileall -q src tests scripts
 uv run python scripts/v02_deterministic_release_gate.py
 uv run python scripts/doctor_negative_gate.py
 
-# v0.3.1 taxonomy N1 gates (layer C2)
-uv run python scripts/v031_taxonomy_release_gate.py
-uv run python scripts/v031_acceptance_e2e.py
-uv run python scripts/v032_retrieval_release_gate.py
-uv run python scripts/v033_retrieval_eval_release_gate.py
-
-# v0.3.1 taxonomy dogfood (layer E; repo-local by default)
-uv run python scripts/v031_real_corpus_dogfood_gate.py
-
-# v0.3.2 retrieval dogfood (optional; writes docs/planning/v0.3.2-retrieval-dogfood-report.md)
-uv run python scripts/v032_retrieval_real_corpus_dogfood.py
-# Private corpus:
-# $env:INDB_REAL_CORPUS='D:\path\to\files'
-# uv run python scripts/v031_real_corpus_dogfood_gate.py
+# v0.3.1 category foundation (when touching taxonomy)
+uv run python scripts/v031_taxonomy_category_release_gate.py
 
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
@@ -43,11 +31,10 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | --- | --- | --- |
 | A/B — pytest + compileall | A, B | `uv run python -m pytest`, `compileall` |
 | C — v0.2 deterministic vault + doctor negative | C | deterministic + doctor negative scripts |
-| C2 — v0.3.1 taxonomy N1 gates | C2 | `scripts/v031_taxonomy_release_gate.py` (n1–n6) + `scripts/v031_acceptance_e2e.py` |
-| C3 — v0.3.2 retrieval release gate | C3 | `scripts/v032_retrieval_release_gate.py` |
-| C4 — v0.3.3 retrieval eval release gate | C4 | `scripts/v033_retrieval_eval_release_gate.py` |
 | D — real swallow smoke | D | `INDBASE_SWALLOW_SMOKE=1`, `uv sync --extra swallow` |
 | D — real Node transition smoke | D | `INDBASE_TRANSITION_SMOKE=1`, Node 20 |
+| v0.3.1 — taxonomy category gate | v0.3.1 | `scripts/v031_taxonomy_category_release_gate.py` |
+| retired template guard | guard | no `minimal` template in `scripts/`, `README.md`, `docs/development.md` |
 
 Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/workflows/release-dogfood.yml) — manual or weekly; uses `tests/fixtures/v02_dogfood_corpus/` or repo variable `INDB_REAL_CORPUS`.
 
@@ -55,7 +42,7 @@ Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/
 
 ## Pytest suite (layer A)
 
-**Total:** 232 tests in `tests/` (collected with `python -m pytest --collect-only`).
+**Total:** 261 tests in `tests/` (collected with `python -m pytest --collect-only`).
 
 Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["tests"]`, `pythonpath = ["src"]`).
 
@@ -77,7 +64,7 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `test_ocr.py` | 16 | OCR runs, pages, doctor |
 | `test_classification.py` | 14 | Suggest/accept/reject, audit |
 | `test_search.py` | 13 | FTS snippets, doc/rev/chunk binding, archive filter |
-| `test_ingest_pipeline.py` | 12 | M2/M3 pipelines, folder issues, re-ingest |
+| `test_ingest_pipeline.py` | 14 | M2/M3 pipelines, folder issues, re-ingest |
 | `test_translations.py` | 12 | Chunk/document translation records |
 | `test_cards.py` | 9 | Candidate card lifecycle |
 | `test_search_text.py` | 9 | CJK/text normalization for search |
@@ -100,11 +87,13 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `test_output_queries.py` | 1 | Output run queries |
 | `test_swallow_adapter.py` | 2 | Adapter boundary |
 | `test_db.py` | 2 | Migrations applied |
-| `test_vault.py` | 2 | Init layout |
+| `test_vault.py` | 2 | Init layout, `indbase_default_v1` template |
+| `test_v031_category_taxonomy.py` | 8 | v0.3.1 profiles, classifier, search filter, post-ingest taxonomy |
 | `test_revisions.py` | 2 | Immutable revision files |
 | `test_documents.py` | 2 | Document metadata |
 | `test_ids.py` | 3 | ID formats |
 | `test_imports.py` | 1 | Package import smoke |
+| `test_indbase_agent.py` | 19 | Agent adapter previews, ingest execution blocks, cancellation, duplicate interaction, artifact views |
 | `test_transition_bridge_smoke.py` | 1 | Real Node subprocess (opt-in env) |
 
 ### v0.2-specific automated proofs
@@ -129,26 +118,11 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v02_transition_smoke_gate.py` | D | Real `node` bridge subprocess + evidence archive |
 | `v02_real_corpus_dogfood_gate.py` | E | Folder ingest + doctor hard = 0 on real/staged corpus |
 | `v02_release_gate.py` | A–E aggregate | All required layers; D/E per env |
-| `v031_taxonomy_release_gate.py` | C2 | Schema/doctor, profile/features, tag candidates, category manager, janitor audit, fake LLM harness (n1–n6) |
-| `v031_real_corpus_dogfood_gate.py` | E (v0.3.1) | Repo-local or `INDB_REAL_CORPUS`: ingest → profiles → taxonomy analyze/suggest → janitor → doctor hard = 0 |
-| `v032_retrieval_release_gate.py` | C3 | Deterministic retrieve packages, explicit filters, per-doc limit, no citations/search_results writes |
+| `v031_taxonomy_category_release_gate.py` | v0.3.1 | Fixture classifier: zero wrong confident assignments; manual preserve; doctor hard = 0 |
 
-Shared helpers: `scripts/gate_common.py`, `scripts/taxonomy_gate_common.py`.
+Shared helpers: `scripts/gate_common.py`.
 
-### v0.3.2 retrieval tests
-
-| Tests | What they prove |
-| --- | --- |
-| `test_retrieval.py` | Parser/filters, persistence, exact quotes, tag hard filter, per-doc limit, archive exclusion, CLI retrieve/list/show |
-
-### v0.3.1 taxonomy tests
-
-| Tests | What they prove |
-| --- | --- |
-| `test_taxonomy_schema.py` | Migration `0008`, typed tags, doctor taxonomy integrity |
-| `test_profile_taxonomy.py` | Profile build, feature atoms, deterministic taxonomy analyze |
-| `test_taxonomy_slice3.py` | Suggestions accept/reject, category manager, tag candidates, janitor audit-only |
-| `test_llm_harness.py` | Fake provider, schema/quote validation, `model_calls`, no direct provider imports |
+New vault initialization in gates and tests uses `indbase_default_v1` only (`minimal` / `academic` / `full` are retired for new init).
 
 ## Historical MVP gates (reference only)
 
@@ -177,7 +151,7 @@ uv run python scripts/v02_transition_smoke_gate.py
 ## What passing means (release bar)
 
 ```text
-232/232 pytest passed
+261/261 pytest passed
 compileall clean
 v02 deterministic gate passed
 doctor negative gate passed

@@ -27,6 +27,7 @@ class SearchOptions:
     persist_search_results: bool = False
     cjk_strategy: str = "substring_fallback"
     mode: str = "fts"
+    category_id: str | None = None
 
     @classmethod
     def from_config(cls, config: SearchConfig) -> "SearchOptions":
@@ -78,7 +79,19 @@ def search_chunks(
     options: SearchOptions | None = None,
 ) -> SearchResultSet:
     opts = options or SearchOptions()
-    normalized_query = query.strip()
+    from indbase_core.category_taxonomy import parse_search_query
+
+    category_ref, remainder = parse_search_query(query)
+    normalized_query = remainder.strip()
+    category_id = opts.category_id
+    if category_ref and not category_id:
+        from indbase_core.category_taxonomy import resolve_category_filter
+
+        category_id = resolve_category_filter(connection, category_ref)
+        if category_id is None:
+            raise ValueError(f"Unknown category filter: {category_ref}")
+    if not normalized_query and category_id:
+        normalized_query = "*"
     if not normalized_query:
         return SearchResultSet(query_id=None, query_text=query, result_count=0, results=())
     if opts.mode not in {"fts", "vector", "hybrid"}:
@@ -87,7 +100,12 @@ def search_chunks(
     candidates: dict[str, _Candidate] = {}
     if opts.mode in {"fts", "hybrid"}:
         for rank, (chunk_id, score) in enumerate(
-            _fts_candidates(connection, normalized_query, limit=max(opts.top_k * 5, 25)),
+            _fts_candidates(
+                connection,
+                normalized_query,
+                limit=max(opts.top_k * 5, 25),
+                category_id=category_id,
+            ),
             start=1,
         ):
             candidates[chunk_id] = _Candidate(
@@ -99,7 +117,10 @@ def search_chunks(
 
         cjk_query = prepare_cjk_fallback_query(normalized_query)
         if opts.cjk_strategy == "substring_fallback" and cjk_query.has_cjk:
-            for rank, (chunk_id, score) in enumerate(_cjk_fallback_candidates(connection, normalized_query), start=1):
+            for rank, (chunk_id, score) in enumerate(
+                _cjk_fallback_candidates(connection, normalized_query, category_id=category_id),
+                start=1,
+            ):
                 candidate = candidates.get(chunk_id)
                 if candidate is None:
                     candidates[chunk_id] = _Candidate(
@@ -192,13 +213,40 @@ def build_snippet(text: str, query: str, *, max_chars: int = 220) -> str:
     return snippet
 
 
-def _fts_candidates(connection: sqlite3.Connection, query: str, *, limit: int) -> list[tuple[str, float]]:
+def _fts_candidates(
+    connection: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int,
+    category_id: str | None = None,
+) -> list[tuple[str, float]]:
     match_query = _fts_match_query(query)
-    if not match_query:
+    if query != "*" and not match_query:
         return []
-    try:
-        rows = connection.execute(
-            """
+    if query == "*":
+        match_query = None
+    category_clause = ""
+    params: list[object] = []
+    if category_id:
+        category_clause = " AND d.category_id = ?"
+        params.append(category_id)
+    if match_query is None:
+        sql = f"""
+            SELECT c.chunk_id, 0.0 AS score
+            FROM chunks c
+            JOIN documents d ON d.doc_id = c.doc_id
+            WHERE d.status = 'active'
+              AND d.deleted_at IS NULL
+              AND d.current_revision_id = c.revision_id
+              AND c.is_current = 1
+              AND c.deleted_at IS NULL
+              {category_clause}
+            ORDER BY d.created_at, c.sequence
+            LIMIT ?
+        """
+        params.append(limit)
+    else:
+        sql = f"""
             SELECT f.chunk_id, bm25(chunks_fts) AS score
             FROM chunks_fts f
             JOIN chunks c ON c.chunk_id = f.chunk_id
@@ -209,19 +257,31 @@ def _fts_candidates(connection: sqlite3.Connection, query: str, *, limit: int) -
               AND d.current_revision_id = c.revision_id
               AND c.is_current = 1
               AND c.deleted_at IS NULL
+              {category_clause}
             ORDER BY score
             LIMIT ?
-            """,
-            (match_query, limit),
-        ).fetchall()
+        """
+        params = [match_query, *params, limit]
+    try:
+        rows = connection.execute(sql, params).fetchall()
     except sqlite3.OperationalError:
         return []
     return [(str(row["chunk_id"]), float(row["score"])) for row in rows]
 
 
-def _cjk_fallback_candidates(connection: sqlite3.Connection, query: str) -> list[tuple[str, int]]:
+def _cjk_fallback_candidates(
+    connection: sqlite3.Connection,
+    query: str,
+    *,
+    category_id: str | None = None,
+) -> list[tuple[str, int]]:
+    category_clause = ""
+    params: list[object] = []
+    if category_id:
+        category_clause = " AND d.category_id = ?"
+        params.append(category_id)
     rows = connection.execute(
-        """
+        f"""
         SELECT c.chunk_id, c.heading_path_json, c.text, d.title
         FROM chunks c
         JOIN documents d ON d.doc_id = c.doc_id
@@ -230,8 +290,10 @@ def _cjk_fallback_candidates(connection: sqlite3.Connection, query: str) -> list
           AND d.current_revision_id = c.revision_id
           AND c.is_current = 1
           AND c.deleted_at IS NULL
+          {category_clause}
         ORDER BY d.created_at, c.sequence
-        """
+        """,
+        params,
     ).fetchall()
     scored: list[tuple[str, int]] = []
     for row in rows:

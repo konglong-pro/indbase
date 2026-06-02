@@ -53,7 +53,7 @@ def main() -> None:
     archive = gate_root / "chatgpt-export.zip"
     make_archive_fixture(archive)
 
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     configure_v02_vault(
         vault,
         swallow_ingest=True,

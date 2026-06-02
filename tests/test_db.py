@@ -17,6 +17,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0006_swallow_ingest_integration",
         "0007_transition_output_integration",
         "0008_taxonomy_foundation",
+        "0008_v031_taxonomy_category_foundation",
         "0009_retrieval_intelligence",
         "0010_retrieval_evaluation",
     ]
@@ -53,19 +54,12 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0006_swallow_ingest_integration",
             "0007_transition_output_integration",
             "0008_taxonomy_foundation",
-        "0009_retrieval_intelligence",
-        "0010_retrieval_evaluation",
+            "0008_v031_taxonomy_category_foundation",
+            "0009_retrieval_intelligence",
+            "0010_retrieval_evaluation",
         ]
-        assert "retrieval_eval_cases" in tables
-        assert "answer_readiness_reports" in tables
-        assert "document_profiles" in tables
-        assert "feature_atoms" in tables
-        assert "tag_candidates" in tables
-        assert "taxonomy_suggestions" in tables
-        assert "tag_lifecycle_events" in tables
-        assert "model_calls" in tables
-        tag_columns = {row["name"] for row in connection.execute("PRAGMA table_info(tags)")}
-        assert {"type", "status", "created_by"} <= tag_columns
+        assert "category_profiles" in tables
+        assert "category_classification_runs" in tables
         review_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(review_items)")
@@ -121,15 +115,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             row["name"]
             for row in connection.execute("PRAGMA table_info(documents)")
         }
-        assert {
-            "access_context",
-            "privacy_flags_json",
-            "source_snapshot_path",
-            "category_source",
-            "category_suggestion_id",
-            "category_updated_by",
-            "category_updated_at",
-        } <= document_columns
+        assert {"access_context", "privacy_flags_json", "source_snapshot_path"} <= document_columns
     finally:
         connection.close()
 

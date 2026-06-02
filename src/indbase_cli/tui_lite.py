@@ -45,7 +45,7 @@ def run_tui_lite(
     query: str | None = None,
     limit: int = 10,
     recursive: bool = False,
-    category_template: str = "minimal",
+    category_template: str = "indbase_default_v1",
 ) -> int:
     selected = _normalize_action(action or _prompt_action())
     if selected == "quit":

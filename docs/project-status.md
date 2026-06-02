@@ -1,7 +1,7 @@
 # indbase Project Status
 
-**As of:** 2026-05-20  
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze + active v0.2 expansions)
+**As of:** 2026-06-01
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, and v0.3.1 category-foundation design)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -14,9 +14,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.1 Foundation MVP** | Frozen and shipped as `0.1.0`; full MVP feature stack (ingest → search → doctor → archive, plus M4–M10 features) implemented |
 | **v0.2 swallow-backed ingest** | **Active expansion — implemented** in core/CLI; production conversion requires `features.swallow_ingest=true` |
 | **v0.2 transition-backed output** | **Active expansion — implemented** in core/CLI; requires explicit `indb output runtime install` |
-| **v0.3.1 taxonomy foundation** | **Implemented** — typed tags, profiles, taxonomy suggestions, fake LLM harness; see `docs/planning/v0.3.1-taxonomy-foundation.md` |
-| **v0.3.2 retrieval intelligence foundation** | **Implemented** — `indb retrieve`, persisted retrieval packages, taxonomy-aware boosts; see `docs/planning/v0.3.2-retrieval-intelligence-foundation.md` |
-| **v0.3.3 retrieval evaluation / answer readiness** | **Implemented** — eval cases/runs, answer-readiness reports, `indb eval retrieval`; see `docs/planning/v0.3.3-retrieval-evaluation-answer-readiness.md` |
+| **v0.3.1 taxonomy category foundation** | **Active expansion — implemented (core)**; `indbase_default_v1` catalog, profiles/localizations, auditable classification runs, post-ingest taxonomy (`features.category_taxonomy`), category search filter, doctor checks, fixture gate |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -32,9 +30,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.1 product spec | `docs/planning/mvp-v0.1-spec.md` |
 | v0.2 swallow spec | `docs/planning/v0.2-swallow-ingest-integration.md` |
 | v0.2 transition spec | `docs/planning/v0.2-transition-output-integration.md` |
-| v0.3.1 taxonomy spec | `docs/planning/v0.3.1-taxonomy-foundation.md` |
-| v0.3.2 retrieval spec | `docs/planning/v0.3.2-retrieval-intelligence-foundation.md` |
-| v0.3.3 retrieval eval spec | `docs/planning/v0.3.3-retrieval-evaluation-answer-readiness.md` |
+| v0.3.1 category foundation spec | `docs/planning/v0.3.1-taxonomy-category-foundation.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -129,61 +125,36 @@ indb doc normalize <doc_id> --replace-current
 
 `features.transition_output=true` only after successful `output runtime install`.
 
-## v0.3.2 retrieval intelligence foundation (implemented)
+## v0.3.1 taxonomy category foundation (implemented — core)
 
-**Spec:** `docs/planning/v0.3.2-retrieval-intelligence-foundation.md`  
-**Agent guide:** `docs/agents/v0.3.2-retrieval-intelligence-foundation/AGENT.md`  
-**Migration:** `0009_retrieval_intelligence.sql`
+- **Spec:** `docs/planning/v0.3.1-taxonomy-category-foundation.md`
+- **Agent guide:** `docs/agents/v0.3.1-taxonomy-category-foundation/AGENT.md`
+- **ADR:** `docs/adr/0001-auditable-category-classification.md`
+- **Migration:** `0008_v031_taxonomy_category_foundation.sql`
 
-### Product rules in force
+Category-only scope delivered in core:
 
-- **`indb retrieve`** builds citation-ready, persisted retrieval packages (`retrieval_runs`, `retrieval_items`).
-- Default base mode **hybrid**; default **per_doc_limit = 3**; does not auto-build profiles.
-- Explicit `tag:` / `category:` filters are hard filters; natural-language taxonomy matches are soft boosts only.
-- Pending taxonomy suggestions and tag candidates do not affect retrieval.
-- Does **not** write `citations`, `search_results`, source revisions, chunks, or taxonomy mutations.
-- **`indb search`** behavior unchanged.
+- closed Big Category catalog using `indbase_default_v1`
+- English and Chinese localizations over the same stable category IDs
+- category profiles with positive and negative boundaries
+- post-ingest classification after trusted revisions/chunks/search are created
+- auditable classification runs/results, suggestions, and feedback
+- category search/filter and doctor checks
 
-### Core modules
+**CLI (highlights):** `indb init` defaults to `indbase_default_v1`; `indb catalog list --locale`; `indb catalog ready|unready|profile show`; `indb classify run|feedback`; `indb search --category` or `category:<id> <query>`.
 
-- `retrieval.py` — parser, filter resolver, hybrid candidate generation, boosts, quote extraction, persistence
+**Gate:** `uv run python scripts/v031_taxonomy_category_release_gate.py` (fixture corpus under `tests/fixtures/v031_category_classification/`).
 
-### CLI surface
+Enable post-ingest taxonomy in `config.toml`:
 
-```text
-indb retrieve <query> [--mode fts|vector|hybrid] [--top-k N] [--candidate-k N] [--per-doc-limit N]
-indb retrieval list
-indb retrieval show <retrieval_run_id>
+```toml
+[features]
+category_taxonomy = true
 ```
 
-## v0.3.3 retrieval evaluation / answer readiness (implemented)
+Not yet implemented in this pass: `catalog profile set`, `catalog migrate-default`, full `classify list/show/accept/reject` for v0.3.1 `category_suggestions` (legacy M8 `classify suggest` remains), exhaustive doctor matrix from the spec.
 
-**Spec:** `docs/planning/v0.3.3-retrieval-evaluation-answer-readiness.md`  
-**Agent guide:** `docs/agents/v0.3.3-retrieval-evaluation-answer-readiness/AGENT.md`  
-**Migration:** `0010_retrieval_evaluation.sql`  
-**Fixture:** `tests/fixtures/v033_retrieval_eval/v033_core.jsonl`
-
-### Product rules in force
-
-- **`indb eval retrieval`** imports/exports versioned JSONL cases, runs suites via normal `retrieve`, and persists eval/readiness audit rows.
-- **`indb eval retrieval readiness`** writes `answer_readiness_reports` with verdicts `ready`, `needs_more_evidence`, `not_ready` (policy `answer-readiness-v1`).
-- Future **`indb ask` v1** should consume a readiness-checked `retrieval_run_id`; ask remains out of scope.
-- Deterministic evaluator only — no LLM judge, no model provider, no `citations`, no retrieval ranking/filter/quote rewrite.
-- Eval failures are visible in eval tables (`status`, `error_json`); no task records for eval runs.
-
-### Core modules
-
-- `retrieval_evaluation.py` — JSONL import/export, suite runner, readiness policy, expectation checks
-
-### CLI surface
-
-```text
-indb eval retrieval import <jsonl>
-indb eval retrieval export --suite <name> [--output <path>]
-indb eval retrieval run --suite <name> [--case <id>] [--limit N] [--fail-fast]
-indb eval retrieval list|show <eval_run_id>
-indb eval retrieval readiness <retrieval_run_id>
-```
+Tag governance, retrieval packages, `ask`, real model providers, hidden online learning, source mutation, and destructive category migration remain out of scope.
 
 ## Release gates and CI (current)
 
@@ -191,12 +162,9 @@ indb eval retrieval readiness <retrieval_run_id>
 
 | Layer | What | PR blocker on GitHub |
 | --- | --- | --- |
-| A | `pytest` (232 tests) | Yes |
+| A | `pytest` (261 tests) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
-| C2 | `v031_taxonomy_release_gate.py` (N1 taxonomy gates) | Yes |
-| C3 | `v032_retrieval_release_gate.py` | Yes |
-| C4 | `v033_retrieval_eval_release_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |
 | E | Real-corpus dogfood | No (manual/scheduled workflow) |
 

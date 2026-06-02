@@ -14,9 +14,7 @@ Active **product specifications** and **release gate** definitions for indbase.
 | v0.1 Foundation | [mvp-v0.1-spec.md](mvp-v0.1-spec.md) |
 | v0.2 swallow ingest | [v0.2-swallow-ingest-integration.md](v0.2-swallow-ingest-integration.md) |
 | v0.2 transition output | [v0.2-transition-output-integration.md](v0.2-transition-output-integration.md) |
-| v0.3.1 taxonomy foundation | [v0.3.1-taxonomy-foundation.md](v0.3.1-taxonomy-foundation.md) |
-| v0.3.2 retrieval intelligence foundation | [v0.3.2-retrieval-intelligence-foundation.md](v0.3.2-retrieval-intelligence-foundation.md) |
-| v0.3.3 retrieval evaluation / answer readiness | [v0.3.3-retrieval-evaluation-answer-readiness.md](v0.3.3-retrieval-evaluation-answer-readiness.md) |
+| v0.3.1 taxonomy category foundation | [v0.3.1-taxonomy-category-foundation.md](v0.3.1-taxonomy-category-foundation.md) |
 | v0.2 release gates | [v0.2-release-gate-checkpoint.md](v0.2-release-gate-checkpoint.md) |
 | v0.2 program entry | [v0.2-entry-plan.md](v0.2-entry-plan.md) |
 | v0.1 release manifest | [mvp-v0.1-release-manifest.json](mvp-v0.1-release-manifest.json) |

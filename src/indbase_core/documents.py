@@ -7,7 +7,6 @@ import sqlite3
 
 from indbase_core.indexer import refresh_document_fts_metadata
 from indbase_core.tags import normalize_tag_name
-from indbase_core.taxonomy import validate_category_source
 from indbase_core.time import utc_now_iso
 
 
@@ -101,10 +100,6 @@ def set_document_category(
     connection: sqlite3.Connection,
     doc_id: str,
     category_id: str,
-    *,
-    category_source: str = "manual",
-    category_suggestion_id: str | None = None,
-    category_updated_by: str = "manual",
 ) -> DocumentCategoryChange:
     row = connection.execute(
         """
@@ -131,7 +126,6 @@ def set_document_category(
     if category is None:
         raise ValueError(f"Active category not found: {category_id}")
 
-    clean_source = validate_category_source(category_source)
     previous = row["category_id"]
     changed = previous != category_id
     if changed:
@@ -139,26 +133,25 @@ def set_document_category(
         connection.execute(
             """
             UPDATE documents
-            SET category_id = ?,
-                category_source = ?,
-                category_suggestion_id = ?,
-                category_updated_by = ?,
-                category_updated_at = ?,
-                updated_at = ?
+            SET category_id = ?, classification_status = 'manual', updated_at = ?
             WHERE doc_id = ?
               AND deleted_at IS NULL
             """,
-            (
-                category_id,
-                clean_source,
-                category_suggestion_id,
-                category_updated_by,
-                now,
-                now,
-                doc_id,
-            ),
+            (category_id, now, doc_id),
         )
         refresh_document_fts_metadata(connection, doc_id)
+        connection.commit()
+    elif row["category_id"] == category_id:
+        connection.execute(
+            """
+            UPDATE documents
+            SET classification_status = 'manual', updated_at = ?
+            WHERE doc_id = ?
+              AND deleted_at IS NULL
+              AND COALESCE(classification_status, '') NOT IN ('manual', 'accepted')
+            """,
+            (utc_now_iso(), doc_id),
+        )
         connection.commit()
     return DocumentCategoryChange(
         doc_id=doc_id,

@@ -15,7 +15,7 @@ from conftest_output import insert_minimal_document
 @pytest.fixture
 def transition_vault(tmp_path: Path):
     vault = tmp_path / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     install_runtime(vault, run_npm_install=False)
     connection = connect(vault_paths(vault).db_path)
     try:

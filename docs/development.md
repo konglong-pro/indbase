@@ -24,7 +24,7 @@ uv sync --group dev --extra swallow-playwright
 ## First vault
 
 ```powershell
-uv run indb init .\my-vault --category-template minimal
+uv run indb init .\my-vault
 uv run indb ingest .\samples --vault .\my-vault --recursive
 uv run indb search "needle" --vault .\my-vault
 uv run indb doctor --vault .\my-vault

@@ -18,7 +18,7 @@ from taxonomy_gate_common import make_gate_root
 def main() -> None:
     root = make_gate_root("n1-taxonomy-schema")
     vault = root / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
 
     try:
         validate_tag_type("not-a-real-type")
@@ -46,7 +46,7 @@ def main() -> None:
         ).fetchone()["count"]
 
     corrupt = root / "corrupt"
-    init_vault(corrupt, category_template="minimal")
+    init_vault(corrupt, category_template="indbase_default_v1")
     with connect(corrupt / ".indbase" / "db.sqlite") as connection:
         tag_id = add_tag(connection, "corrupt-tag", tag_type="topic")
         connection.execute("UPDATE tags SET type = 'invalid_type' WHERE tag_id = ?", (tag_id,))

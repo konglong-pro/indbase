@@ -4,7 +4,7 @@
 
 Local-first personal knowledge database: ingest local files into a vault, keep immutable source revisions, chunk and index content, and return searchable snippets tied to `doc_id` / `revision_id` / `chunk_id`.
 
-**Current status:** v0.1 Foundation MVP is frozen at `0.1.0`; **v0.2 swallow ingest** and **v0.2 transition output** are implemented; **v0.3.1 taxonomy** and **v0.3.2 retrieval packages** (`indb retrieve`) are implemented. See [Project status](docs/project-status.md) for the full delivery summary.
+**Current status:** v0.1 Foundation MVP is frozen at `0.1.0`; **v0.2 swallow ingest** and **v0.2 transition output** are implemented. See [Project status](docs/project-status.md) for the full delivery summary.
 
 ## Who this is for
 
@@ -35,7 +35,7 @@ uv sync --group dev --extra swallow
 
 ```powershell
 # Create a vault
-uv run indb init .\my-vault --category-template minimal
+uv run indb init .\my-vault
 
 # Enable swallow for real conversion (required for v0.2 ingest)
 # Edit my-vault\.indbase\config\config.toml → features.swallow_ingest = true
@@ -43,7 +43,6 @@ uv run indb init .\my-vault --category-template minimal
 
 uv run indb ingest .\path\to\sources --vault .\my-vault --recursive
 uv run indb search "your query" --vault .\my-vault
-uv run indb retrieve "your query" --vault .\my-vault
 uv run indb doctor --vault .\my-vault
 ```
 
@@ -62,7 +61,6 @@ uv run indb doc normalize <doc_id> --replace-current --vault .\my-vault
 | Vault | `indb init`, `indb doctor` |
 | Ingest | `indb ingest <path>`, `indb ingest url <url>`, `indb ingest archive <zip>` |
 | Search | `indb search <query>`, `indb search <query> --mode hybrid` |
-| Retrieve (v0.3.2) | `indb retrieve <query>`, `indb retrieval list`, `indb retrieval show <run_id>` |
 | Documents | `indb doc show`, `indb doc archive`, `indb doc restore`, `indb doc revisions` |
 | Output (v0.2) | `indb output runtime install`, `indb output export source`, `indb doc normalize` |
 | Ops | `indb task list`, `indb review list`, `indb error list`, `indb index rebuild --fts` |
@@ -76,8 +74,6 @@ uv run python -m pytest
 uv run python -m compileall -q src tests scripts
 uv run python scripts/v02_deterministic_release_gate.py
 uv run python scripts/doctor_negative_gate.py
-uv run python scripts/v031_taxonomy_release_gate.py
-uv run python scripts/v032_retrieval_release_gate.py
 ```
 
 Details: [Testing](docs/testing.md).
