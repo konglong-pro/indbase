@@ -1,7 +1,7 @@
 # indbase Project Status
 
-**As of:** 2026-06-02
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, and v0.3.2 tag-governance design)
+**As of:** 2026-06-03
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, and v0.3.2.1 tag harness hardening)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -16,6 +16,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.2 transition-backed output** | **Active expansion — implemented** in core/CLI; requires explicit `indb output runtime install` |
 | **v0.3.1 taxonomy category foundation** | **Active expansion — implemented (core)**; `indbase_default_v1` catalog, profiles/localizations, auditable classification runs, post-ingest taxonomy (`features.category_taxonomy`), category search filter, doctor checks, fixture gate |
 | **v0.3.2 tag governance foundation** | **Active expansion — implemented (core)**; migration `0011`, tag resolution/admission/budget/blocklist, deterministic tagger, candidate accept/reject + feedback/audit, relation-backed tag search filter, post-ingest tagging flags (`features.tag_governance`, `features.post_ingest_tagging`), doctor checks, fixture gate + CI job |
+| **v0.3.2.1 tag harness hardening** | **Active expansion — implemented (core)**; fixture schema + sanitized suite, isolated eval vault runner (`tag_harness_eval`), stable summary/failure JSON, hard gates, report-only precision/recall, release gate + CI job C2c |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -33,6 +34,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.2 transition spec | `docs/planning/v0.2-transition-output-integration.md` |
 | v0.3.1 category foundation spec | `docs/planning/v0.3.1-taxonomy-category-foundation.md` |
 | v0.3.2 tag governance spec | `docs/planning/v0.3.2-tag-governance-foundation.md` |
+| v0.3.2.1 tag harness spec | `docs/planning/v0.3.2.1-tag-harness-hardening.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -191,13 +193,42 @@ doctor_hard_findings = 0
 
 **Not yet in this pass:** dedicated `indb tag run` / `indb tag candidates` CLI group with stable `--json` (legacy `taxonomy promote-tag` / `reject-tag` call the new review path for scoped candidates). TUI, consoler UI, retrieval packages, `ask`, real providers, embedding-backed taggers, hidden online learning, ontology management, project namespaces, automatic batch propagation, and destructive cleanup remain out of scope.
 
+## v0.3.2.1 tag harness hardening (implemented core)
+
+- **Spec:** `docs/planning/v0.3.2.1-tag-harness-hardening.md`
+- **Agent guide:** `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md`
+
+**Delivered in core/tests/scripts:**
+
+- Explicit fixture schema and sanitized suite under `tests/fixtures/v0321_tag_harness/`
+- Pure evaluation layer `src/indbase_core/tag_harness_eval.py` (isolated eval vault, per-doc deterministic tagger runs, exact expectation checks)
+- Stable summary JSON + failure records with reason codes; optional artifact output
+- Gate: `scripts/v0321_tag_harness_release_gate.py`; CI job **C2c — v0.3.2.1 tag harness gate**
+- Tests: `tests/test_v0321_tag_harness.py`
+
+**Hard gates (must be zero):**
+
+```text
+wrong_auto_attached_tags
+manual_tag_mutations
+trusted_filter_pollution
+deprecated_merged_archived_auto_attach
+unresolved_candidate_persisted
+budget_violations
+policy_mutations_by_harness
+```
+
+**Report-only:** candidate precision/recall, near-budget pressure, sprawl reason tallies.
+
+**Out of scope:** formal `indb tag harness` CLI, production schema/migrations, providers/embeddings, search ranking changes, retrieval/`ask`, automatic policy mutation, raw private fixture commits.
+
 ## Release gates and CI (current)
 
 **Canonical gate doc:** `docs/planning/v0.2-release-gate-checkpoint.md`
 
 | Layer | What | PR blocker on GitHub |
 | --- | --- | --- |
-| A | `pytest` (306 collected) | Yes |
+| A | `pytest` (314 collected) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |

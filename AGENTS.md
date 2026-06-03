@@ -18,8 +18,10 @@ For detailed product and architecture planning, use:
 - `docs/agents/v0.3.1-taxonomy-category-foundation/AGENT.md` for implementation rules specific to the category foundation
 - `docs/planning/v0.3.2-tag-governance-foundation.md` for the explicitly approved tag governance foundation
 - `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md` for implementation rules specific to tag governance
+- `docs/planning/v0.3.2.1-tag-harness-hardening.md` for the explicitly approved tag harness hardening phase
+- `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md` for implementation rules specific to tag harness hardening
 
-Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
+Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
 
 Do not duplicate the full MVP specification in this file. Treat this file as the operational rulebook for agents, and treat the planning docs as the source of truth for product and architecture details.
 
@@ -43,7 +45,7 @@ Documentation rules:
 
 `indbase` is a local-first personal knowledge database. It ingests local materials into a vault, preserves originals, writes readable Markdown, records metadata and immutable revisions, chunks content, builds SQLite FTS indexes, and returns reliable search snippets tied to source chunks.
 
-The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, and **v0.3.2 tag governance foundation**.
+The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, and **v0.3.2.1 tag harness hardening**.
 
 Do not implement other v0.2 or v0.3 functionality unless explicitly instructed in a task.
 
@@ -333,6 +335,27 @@ Rules:
 - Post-Ingest Tagging is disabled by default and feature-flagged.
 - TUI and consoler UI are out of scope; stable `--json` command output is required for future consoler integration.
 - Retrieval packages, `ask`, real providers, embedding-backed taggers, ontology management, project namespaces, and automatic batch propagation are out of scope.
+
+### Active v0.3.2.1 Tag Harness Hardening
+
+The user explicitly approved tag harness hardening after v0.3.2 tag governance. For tag harness work:
+
+```text
+explicit fixtures -> isolated eval vault -> deterministic harness run
+-> exact expectation checks -> summary/artifacts -> release gate
+```
+
+Rules:
+
+- v0.3.2.1 proves governed tag behavior is measurable and regression-testable; it does not complete broader tag/search governance.
+- Use `docs/planning/v0.3.2.1-tag-harness-hardening.md` and `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md` before implementation.
+- Harness runs must be deterministic, local, and isolated from production vaults.
+- Harness may produce metrics, artifacts, release-gate failures, and policy suggestions, but must not automatically mutate tag policy, aliases, merges, scopes, blocklists, budgets, or applied tags.
+- Repository fixtures must be synthetic or sanitized; do not commit raw private vault content.
+- Hard-gate fixture expectations must match case by case; aggregate metrics must not hide dangerous failures.
+- Wrong auto-attached tags, manual tag mutations, trusted filter pollution, lifecycle-ineligible auto-attach, unresolved candidate persistence, budget violations, and harness policy mutation are release blockers.
+- Candidate precision and recall are report-only in v0.3.2.1.
+- Do not add formal user CLI, production schema, real providers, embedding-backed taggers, search ranking changes, retrieval packages, `ask`, or ingest-conversion validation in this phase unless explicitly requested.
 
 ### v0.3 Intelligent Workflow MVP
 
@@ -705,6 +728,8 @@ If the task belongs to the approved v0.2 transition output expansion, implement 
 If the task belongs to the approved v0.3.1 category-only taxonomy foundation, implement it according to `docs/planning/v0.3.1-taxonomy-category-foundation.md` and `docs/agents/v0.3.1-taxonomy-category-foundation/AGENT.md`.
 
 If the task belongs to the approved v0.3.2 tag governance foundation, implement it according to `docs/planning/v0.3.2-tag-governance-foundation.md` and `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md`.
+
+If the task belongs to the approved v0.3.2.1 tag harness hardening phase, implement it according to `docs/planning/v0.3.2.1-tag-harness-hardening.md` and `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md`.
 
 If the task belongs to any other v0.2 or v0.3 area and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep the current stable layer intact.
 

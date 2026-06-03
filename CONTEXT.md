@@ -188,6 +188,10 @@ _Avoid_: auto-created formal tag
 A governance limit that controls how many tags may be suggested, promoted, or attached so the tag system does not fragment into overly specific labels.
 _Avoid_: unlimited tagging, tag sprawl
 
+**Explainable Tag Quantity Control**:
+The tag governance behavior that reports why candidate volume, new-tag proposal volume, near-budget pressure, or sprawl blocking occurred instead of exposing only a pass/fail budget number.
+_Avoid_: opaque budget, hidden throttling, unexplained tag sprawl
+
 **Tag Feedback**:
 An explicit user decision about a tag candidate, tag attachment, merge, alias, deprecation, removal, or policy suggestion.
 _Avoid_: hidden training signal, implicit preference
@@ -199,6 +203,126 @@ _Avoid_: silent tag mutation, untracked rename
 **Tag Harness**:
 The evaluation workflow that runs tag policy and candidate generation against fixtures and feedback-derived cases.
 _Avoid_: production tagger, hidden model tuning
+
+**Tag Harness Hardening**:
+The v0.3.2.1 phase that makes tag governance measurable, regression-testable, feedback-aware, and hard to regress without overwriting the existing v0.3.3 retrieval evaluation phase.
+_Avoid_: v0.3.3 tag phase, automatic policy mutation, broad tag/search redesign
+
+**Tag Harness Case**:
+The smallest reproducible tag evaluation example, usually one document, snippet, or feedback-derived scenario with expected resolution, candidate, attachment, or block behavior.
+_Avoid_: production document, trusted metadata
+
+**Tag Harness Run**:
+An auditable evaluation execution that aggregates tag harness cases across candidate, document, and run-level metrics.
+_Avoid_: ingest run, hidden training pass
+
+**Tag Harness Eval Vault**:
+An isolated temporary or fixture vault created for tag harness execution so evaluation can seed documents, tags, candidates, and search indexes without touching a user's production vault.
+_Avoid_: production vault, shared user state, implicit migration target
+
+**Tag Harness Seed Document**:
+A trusted current-revision document seeded into a **Tag Harness Eval Vault** with chunks and FTS state so tag governance can be evaluated without invoking real ingest conversion.
+_Avoid_: swallow conversion test, transition export test, OCR fixture
+
+**Tag Harness Fixture Suite**:
+A stable collection of hand-written, feedback-derived, and approved dogfood cases used to evaluate tag governance behavior.
+_Avoid_: live production vault, unreviewed feedback stream
+
+**Tag Harness Case Schema**:
+The explicit expected-outcome contract for a tag harness case, including seed tags, manual tags, raw candidates, expected auto-attached tags, expected candidates, expected blocked candidates, expected search hits, and expected warnings.
+_Avoid_: inferred expectation, free-text-only case, case-name convention
+
+**Feedback-Derived Tag Harness Case**:
+A **Tag Harness Case** explicitly exported from reviewed **Tag Feedback** or **Tag Governance Events** so it can become a stable regression fixture.
+_Avoid_: implicit learning, unreviewed feedback, live mutation
+
+**Sanitized Tag Harness Fixture**:
+A synthetic or redacted tag harness fixture that preserves governance behavior while removing private document content before it is committed to the repository.
+_Avoid_: raw production document, private vault excerpt, unsanitized feedback export
+
+**Tag Feedback Regression Loop**:
+The explicit loop that turns reviewed tag feedback or governance events into stable harness cases and verifies that future tag behavior does not regress.
+_Avoid_: automatic training, hidden policy update, production-state drift
+
+**Tag Harness Coverage Matrix**:
+The minimum fixture coverage for v0.3.2.1, spanning safe canonical auto-attachment, alias resolution, lifecycle ineligibility, blocklist/sprawl rejection, manual tag protection, scope boundaries, search-filter non-pollution, and feedback-derived regression.
+_Avoid_: broad corpus wish list, unscoped quality benchmark
+
+**Tag Harness Hard Gate**:
+A release-blocking tag harness metric where dangerous governance violations must be zero.
+_Avoid_: broad quality score, recall target, advisory warning
+
+**Tag Harness Summary**:
+A stable machine-readable evaluation summary, usually JSON, that release gates and CI can read without parsing human output.
+_Avoid_: Rich table, ad hoc console text, production vault record
+
+**Tag Harness Artifact**:
+A local diagnostic artifact, such as Markdown or JSONL, that explains failed cases, inputs, expectations, actual outcomes, and governance reasons.
+_Avoid_: required production metadata, trusted tag state
+
+**Tag Harness Failure Record**:
+A stable case-level failure object that includes case identity, evaluation layer, severity, reason code, expected outcome, actual outcome, and governance reasons.
+_Avoid_: prose-only failure, traceback as contract
+
+**Minimal Tag Harness Reproduction**:
+The smallest case-level failure detail needed to reproduce a tag harness regression, including the case ID, raw candidate, expected outcome, actual outcome, and reason code.
+_Avoid_: aggregate-only metric, vague failure summary
+
+**Tag Harness Reason Code**:
+A stable machine-readable code for tag harness failures, such as wrong auto-attachment, manual tag mutation, trusted filter pollution, budget violation, lifecycle-ineligible auto-attachment, unresolved candidate persistence, or harness policy mutation.
+_Avoid_: localized message, free-form explanation
+
+**Tag Harness Release Gate Script**:
+The v0.3.2.1 executable verification entry point for CI and release checks before any formal user-facing tag harness CLI is promised.
+_Avoid_: stable user command, consoler UI command, interactive workflow
+
+**Tag Harness CI Gate**:
+The pull-request CI job that runs the v0.3.2.1 tag harness release gate after tag governance foundation checks and before retrieval evaluation checks.
+_Avoid_: local-only script, post-release manual check
+
+**Tag Harness Validation Suite**:
+The required command set for validating v0.3.2.1, including focused tag governance tests, focused tag harness tests, the v0.3.2 governance gate, the v0.3.2.1 harness gate, full pytest, compileall, and the CI harness job.
+_Avoid_: single smoke test, unchecked local script, undocumented manual check
+
+**Deterministic Tag Harness**:
+A local, repeatable v0.3.2.1 harness that evaluates governed tag behavior without real providers, embeddings, API keys, network calls, or nondeterministic model output.
+_Avoid_: provider-backed tagger, embedding evaluation, network-dependent gate
+
+**Pure Tag Harness Evaluation Layer**:
+The v0.3.2.1 implementation boundary where the harness orchestrates fixture loading, eval-vault seeding, existing tag governance/search services, metric aggregation, summaries, and artifacts without redefining core tag semantics.
+_Avoid_: replacement tagger, alternate tag governance engine, hidden policy fork
+
+**Fixture-First Tag Harness Implementation**:
+The v0.3.2.1 implementation order where explicit fixture schemas and failing harness tests are written before the harness runner and release gate.
+_Avoid_: runner-first implementation, cherry-picked passing fixtures
+
+**Exact Tag Harness Expectation Match**:
+The rule that hard-gate harness cases must match explicit expected auto-attachments, candidates, blocked outcomes, search hits, warnings, and failure reasons case by case.
+_Avoid_: aggregate threshold hiding case failure, best-effort fixture interpretation
+
+**Report-Only Tag Harness Metric**:
+A non-blocking v0.3.2.1 metric, such as candidate precision or recall on a small fixture corpus, that informs future policy work without failing release by itself.
+_Avoid_: premature global threshold, false stability score
+
+**Schema-Neutral Tag Harness**:
+A v0.3.2.1 constraint that tag harness evaluation should use fixture suites, eval vaults, test helpers, and artifacts before adding production vault schema.
+_Avoid_: production migration by default, long-term user vault run history
+
+**Tag Harness Search Check**:
+A tag harness validation that proves trusted tag filters resolve through formal tag relationships and do not leak candidate, raw, deprecated, archived, or merged tag state.
+_Avoid_: ranking evaluation, hybrid search, query expansion, ask
+
+**Wrong Auto-Attached Tag**:
+An **Auto-Attached Tag** that the harness expectation says should not have been applied to the document.
+_Avoid_: missing candidate, low-confidence suggestion
+
+**Manual Tag Mutation**:
+Any automatic or harness-driven change that deletes, overwrites, or silently replaces a manually applied tag.
+_Avoid_: reviewable suggestion, explicit user removal
+
+**Trusted Filter Pollution**:
+A case where a trusted **Tag Search Filter** returns documents or chunks through candidate, raw, deprecated, archived, merged, or otherwise untrusted tag state.
+_Avoid_: broad full-text match, candidate preview
 
 **Tagger**:
 The deterministic local workflow that proposes or attaches tags using current-revision evidence, formal tag metadata, aliases, and approved tag policy.
@@ -227,6 +351,22 @@ _Avoid_: automatic policy change, hidden learning
 **Tag Doctor Finding**:
 A health finding about tag resolution, tag search correctness, candidate integrity, audit integrity, or tag sprawl risk.
 _Avoid_: automatic tag fix, hidden merge
+
+**Tag Harness Doctor Boundary**:
+The responsibility split where the tag harness proves expected behavior against fixtures and release gates, while doctor checks real vault health without running the full harness suite.
+_Avoid_: doctor as regression harness, harness as vault repair tool
+
+**Tag Harness Completion Boundary**:
+The v0.3.2.1 acceptance boundary that proves governed tag behavior is measurable and regression-testable without claiming broader tag/search governance is complete.
+_Avoid_: tag/search governance complete, ranking readiness, ask readiness
+
+**Tag Harness Non-Goals**:
+The explicit out-of-scope boundary for v0.3.2.1, excluding formal user CLI commitments, production schema expansion by default, provider-backed intelligence, broader search improvements, automatic policy mutation, private fixture leakage, ingest conversion validation, and tag-governance semantic rewrites.
+_Avoid_: hidden scope creep, bundled search phase, bundled ask phase
+
+**User-Curated Tag State**:
+The active formal tag, alias, lifecycle, scope, and policy metadata after a user has added, edited, deprecated, merged, archived, or scoped tags.
+_Avoid_: default seed tags only, fixture-only catalog
 
 **Auto-Attached Tag**:
 An existing active **Formal Tag** attached by an automatic workflow only after passing evidence, confidence, lifecycle, and volume-budget checks.
@@ -309,12 +449,47 @@ _Avoid_: top score only
 - Accepting a **Candidate Tag** applies only to the current document unless a separate **Tag Propagation** workflow is explicitly run.
 - **Tag Propagation** must create reviewable proposals or require an explicit apply command with limits; it is not hidden batch tagging.
 - A **Tag Volume Budget** prevents tag suggestions and promotions from producing tag sprawl; the v1 default is at most 5 auto-attached tags per document, 5 candidates per document, 20 new-tag proposals per run, 200 total candidates per run, and new unseeded tags should normally appear in at least 2 documents before promotion.
+- **Explainable Tag Quantity Control** makes tag volume governance auditable: budget violations are hard failures, while near-budget documents and dominant sprawl reasons are reportable warnings for policy review.
 - **Category Search Filter** belongs to the category foundation phase; tag-aware search belongs to **Tag Governance**.
 - A **Tag Search Filter** is authoritative only when it follows `document_tags` through resolved **Formal Tags**.
 - Full-text matches against tag metadata can help broad search, but they are not a trusted **Tag Search Filter**.
 - **Tag Feedback** is explicit audit data, not a hidden training signal.
 - **Tag Governance Events** explain why tag resolution, search, alias, merge, scope, or lifecycle behavior changed.
 - The **Tag Harness** evaluates approved tag policy and feedback-derived cases before release.
+- **Tag Harness Hardening** follows **Tag Governance Foundation** as v0.3.2.1 and precedes broader **Tag Search Filter** governance work.
+- **Tag Harness Hardening** must not replace the existing v0.3.3 retrieval evaluation / answer readiness phase.
+- **Tag Harness Hardening** may produce metrics, reports, release-gate failures, and **Tag Policy Suggestions**, but it must not mutate tag policy, aliases, merges, scopes, blocklists, budgets, or applied tags without an explicit review/accept workflow.
+- **Tag Harness Hardening** evaluates tag behavior at four layers: **Tag Harness Case**, candidate, document, and **Tag Harness Run**.
+- A **Tag Harness Case** is the smallest regression unit; hard release gates usually aggregate candidate, document, and run-level failures.
+- A **Tag Harness Case Schema** must encode expected outcomes explicitly; harness behavior must not be inferred from case names or descriptive prose.
+- A **Tag Harness Fixture Suite** may include hand-written cases, explicitly exported **Feedback-Derived Tag Harness Cases**, and approved dogfood cases.
+- A **Feedback-Derived Tag Harness Case** must come from reviewed feedback or governance events; unreviewed feedback must not silently become a release gate.
+- Repository fixtures for v0.3.2.1 must be **Sanitized Tag Harness Fixtures**; raw production vault content or private feedback exports must not be committed.
+- Feedback-derived or dogfood tag harness cases may enter the repo only after explicit scrub/redact review and should preserve a sanitized-source marker.
+- A **Tag Feedback Regression Loop** verifies accepted, rejected, merged, blocked, or scoped tag decisions as future harness cases, but it must not train a model or mutate production tag policy by itself.
+- The v0.3.2.1 **Tag Harness Coverage Matrix** must cover active canonical auto-attachment, multilingual alias resolution, deprecated/merged/archived ineligibility, blocklist and sprawl rejection, manual tag protection, category-scope boundaries, trusted search-filter non-pollution, and feedback-derived regression.
+- A **Tag Harness Run** must not directly mutate a production vault, tag policy, or applied tag state.
+- A **Tag Harness Run** uses a **Tag Harness Eval Vault** by default, seeds required state through core services, and must not reuse or mutate a user's production vault.
+- A **Tag Harness Seed Document** represents already-trusted source state; v0.3.2.1 does not retest swallow conversion, transition export, OCR, PDF ingest, network calls, or model providers.
+- A **Tag Harness Search Check** may prove seeded documents are searchable through current FTS and trusted tag filters, but ingest/conversion failures are outside the v0.3.2.1 failure domain.
+- **Tag Harness Hard Gates** follow a precision-first rule: missing or low-confidence candidates may be reported, but wrong trusted metadata is a blocker.
+- **Wrong Auto-Attached Tag**, **Manual Tag Mutation**, **Trusted Filter Pollution**, deprecated/merged/archived auto-attachment, unresolved candidate persistence, budget violations, and harness policy mutation are zero-tolerance **Tag Harness Hard Gates**.
+- Candidate tag recall is a report metric in v0.3.2.1, while candidate precision may become a threshold gate once fixture expectations are stable.
+- A **Tag Harness Summary** is the contract for CI and release gates; human-readable output must not be the only source of gate truth.
+- A **Tag Harness Artifact** may explain case-level failures for local debugging, but it must not become trusted user metadata.
+- A **Tag Harness Failure Record** must expose stable **Tag Harness Reason Codes**; release gates and future consoler integration must not parse localized prose to understand failure causes.
+- A **Tag Harness Artifact** should include a **Minimal Tag Harness Reproduction** for each failing case so an implementation agent can reproduce the exact raw candidate, expectation, actual outcome, and reason code.
+- **Tag Harness Run** results should live in fixture/eval vaults or test artifacts by default, not in a user's production vault.
+- v0.3.2.1 exposes tag harness validation through a **Tag Harness Release Gate Script** and test helpers first; a formal `indb tag harness` user command is deferred until the contract is proven.
+- A **Tag Harness CI Gate** should run after the v0.3.2 tag governance gate and before v0.3.3 retrieval evaluation, so tag governance stability is proven before broader retrieval or `ask` work.
+- The **Tag Harness Validation Suite** includes focused v0.3.2/v0.3.2.1 tests, both tag governance and tag harness release gates, full pytest, compileall, and the new CI harness job.
+- A **Deterministic Tag Harness** must not read API keys, call network services, use embedding-backed taggers, or depend on nondeterministic provider output.
+- A **Pure Tag Harness Evaluation Layer** may add a harness orchestration module, but it should call existing tag resolution, admission, budget, tagger, and search services; core service semantics change only when a harness case exposes a real defect.
+- A **Fixture-First Tag Harness Implementation** starts with explicit case schemas, sanitized fixture expectations, and focused failing tests before implementing the harness runner, release gate, CI job, and documentation updates.
+- **Exact Tag Harness Expectation Match** is required for hard-gate fixtures; aggregate metrics summarize results but must not hide individual case failures.
+- Candidate precision and recall are **Report-Only Tag Harness Metrics** in v0.3.2.1 until the fixture corpus is large enough to support meaningful global thresholds.
+- A **Schema-Neutral Tag Harness** should not add production vault migrations or long-term run tables unless the implementation proves existing fixture/eval artifacts cannot support the release gate.
+- A **Tag Harness Search Check** verifies exact trusted tag-filter behavior, alias-to-canonical resolution, and filter non-pollution; it does not expand search ranking, semantic retrieval, query expansion, retrieval packages, or `ask`.
 - The first **Tagger** is deterministic and local; real model or embedding providers are out of scope until governance gates are stable.
 - The **Post-Ingest Tagging Stage** is disabled by default and must not roll back trusted source ingestion.
 - A **Post-Ingest Tagging Stage** may auto-attach only safe existing tags and may create only budgeted reviewable candidates.
@@ -323,6 +498,10 @@ _Avoid_: top score only
 - **Tag Governance Foundation** does not implement TUI; run, review, policy, and search commands expose **Consoler-Facing Command Output** for future UI integration.
 - A **Tag Policy Suggestion** is reviewable and must not mutate aliases, merges, scopes, or admission rules without approval.
 - A **Tag Doctor Finding** reports correctness issues as hard findings and tag-sprawl risks as warnings; doctor does not merge, delete, promote, or repair tags automatically.
+- A **Tag Harness Doctor Boundary** keeps release regression separate from real-vault diagnosis: harness runs fixture behavior checks, while doctor may report tag integrity, lifecycle, candidate-resolution, sprawl, and filter-health issues without executing the full fixture suite.
+- A **Tag Harness Completion Boundary** means v0.3.2.1 proves tag governance regressions can be caught; it does not complete ranking, combined filter behavior, search UX, retrieval packages, or `ask` readiness.
+- **Tag Harness Non-Goals** must be listed in the v0.3.2.1 execution plan so the harness phase does not absorb formal CLI design, production schema design, provider intelligence, broader search governance, ingest validation, or automatic policy mutation.
+- The **Tag Harness Coverage Matrix** must include **User-Curated Tag State**, proving that user-added active canonical tags, edited aliases, and scoped tags are evaluated through current formal metadata rather than default seed tags only.
 - A **Taxonomy Execution Error** is an issue; an intentional **Abstain** is a valid classification outcome.
 - The **Post-Ingest Taxonomy Stage** may classify or abstain after ingest, but it must not roll back trusted source ingestion.
 - A **Confident Assignment** requires **Category Evidence** from the current trusted revision, not unsupported model inference or stale source state.

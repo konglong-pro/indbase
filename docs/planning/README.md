@@ -16,6 +16,7 @@ Active **product specifications** and **release gate** definitions for indbase.
 | v0.2 transition output | [v0.2-transition-output-integration.md](v0.2-transition-output-integration.md) |
 | v0.3.1 taxonomy category foundation | [v0.3.1-taxonomy-category-foundation.md](v0.3.1-taxonomy-category-foundation.md) |
 | v0.3.2 tag governance foundation | [v0.3.2-tag-governance-foundation.md](v0.3.2-tag-governance-foundation.md) |
+| v0.3.2.1 tag harness hardening | [v0.3.2.1-tag-harness-hardening.md](v0.3.2.1-tag-harness-hardening.md) |
 | v0.2 release gates | [v0.2-release-gate-checkpoint.md](v0.2-release-gate-checkpoint.md) |
 | v0.2 program entry | [v0.2-entry-plan.md](v0.2-entry-plan.md) |
 | v0.1 release manifest | [mvp-v0.1-release-manifest.json](mvp-v0.1-release-manifest.json) |
