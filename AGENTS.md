@@ -20,8 +20,10 @@ For detailed product and architecture planning, use:
 - `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md` for implementation rules specific to tag governance
 - `docs/planning/v0.3.2.1-tag-harness-hardening.md` for the explicitly approved tag harness hardening phase
 - `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md` for implementation rules specific to tag harness hardening
+- `docs/planning/v0.3.2.2-tag-search-governance.md` for the explicitly approved tag/search governance phase
+- `docs/agents/v0.3.2.2-tag-search-governance/AGENT.md` for implementation rules specific to tag/search governance
 
-Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
+Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. Treat `docs/planning/v0.3.2.2-tag-search-governance.md` as canonical only for the active v0.3.2.2 tag/search governance phase. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
 
 Do not duplicate the full MVP specification in this file. Treat this file as the operational rulebook for agents, and treat the planning docs as the source of truth for product and architecture details.
 
@@ -45,7 +47,7 @@ Documentation rules:
 
 `indbase` is a local-first personal knowledge database. It ingests local materials into a vault, preserves originals, writes readable Markdown, records metadata and immutable revisions, chunks content, builds SQLite FTS indexes, and returns reliable search snippets tied to source chunks.
 
-The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, and **v0.3.2.1 tag harness hardening**.
+The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, **v0.3.2.1 tag harness hardening**, and **v0.3.2.2 tag/search governance**.
 
 Do not implement other v0.2 or v0.3 functionality unless explicitly instructed in a task.
 
@@ -356,6 +358,28 @@ Rules:
 - Wrong auto-attached tags, manual tag mutations, trusted filter pollution, lifecycle-ineligible auto-attach, unresolved candidate persistence, budget violations, and harness policy mutation are release blockers.
 - Candidate precision and recall are report-only in v0.3.2.1.
 - Do not add formal user CLI, production schema, real providers, embedding-backed taggers, search ranking changes, retrieval packages, `ask`, or ingest-conversion validation in this phase unless explicitly requested.
+
+### Active v0.3.2.2 Tag/Search Governance
+
+The user explicitly approved tag/search governance after v0.3.2.1 tag harness hardening. For governed source search work:
+
+```text
+source text / tag / category filters -> unified filter model
+-> deterministic source search -> explanations -> release gate
+```
+
+Rules:
+
+- Use `docs/planning/v0.3.2.2-tag-search-governance.md` and `docs/agents/v0.3.2.2-tag-search-governance/AGENT.md` before implementation.
+- v0.3.2.2 governs `indb search` source snippets only; retrieval packages, answer readiness, generated answers, and `ask` remain out of scope.
+- Extend existing `indb search`; do not add parallel search commands.
+- Category, tag, and text filters combine with AND semantics.
+- `--tag`, `--category`, `tag:<ref>`, and `category:<ref>` must normalize into one filter model.
+- Trusted tag filters must use `document_tags -> tags`; FTS tag metadata and raw/candidate tags are not trusted filter sources.
+- Invalid filters fail explicitly; valid filters with no matches return empty success.
+- `--json` is the stable machine contract for applied filters, source bindings, snippets, explanations, warnings, and filter errors.
+- Do not rewrite FTS scoring, chunking, indexing, vector/hybrid ranking, or `indb retrieve`.
+- Do not add production schema, providers, embeddings, UI, doctor repair, OR filters, similar-tag expansion, or semantic expansion unless explicitly requested.
 
 ### v0.3 Intelligent Workflow MVP
 
@@ -730,6 +754,8 @@ If the task belongs to the approved v0.3.1 category-only taxonomy foundation, im
 If the task belongs to the approved v0.3.2 tag governance foundation, implement it according to `docs/planning/v0.3.2-tag-governance-foundation.md` and `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md`.
 
 If the task belongs to the approved v0.3.2.1 tag harness hardening phase, implement it according to `docs/planning/v0.3.2.1-tag-harness-hardening.md` and `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md`.
+
+If the task belongs to the approved v0.3.2.2 tag/search governance phase, implement it according to `docs/planning/v0.3.2.2-tag-search-governance.md` and `docs/agents/v0.3.2.2-tag-search-governance/AGENT.md`.
 
 If the task belongs to any other v0.2 or v0.3 area and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep the current stable layer intact.
 

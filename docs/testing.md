@@ -25,6 +25,9 @@ uv run python scripts/v032_tag_governance_release_gate.py
 # v0.3.2.1 tag harness hardening (when touching tag harness)
 uv run python scripts/v0321_tag_harness_release_gate.py
 
+# v0.3.2.2 tag/search governance (when touching governed search)
+uv run python scripts/v0322_tag_search_governance_release_gate.py
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -42,6 +45,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | v0.3.1 — taxonomy category gate | v0.3.1 | `scripts/v031_taxonomy_category_release_gate.py` |
 | C2b — v0.3.2 tag governance gate | v0.3.2 | `scripts/v032_tag_governance_release_gate.py` |
 | C2c — v0.3.2.1 tag harness gate | v0.3.2.1 | `scripts/v0321_tag_harness_release_gate.py` |
+| C2d — v0.3.2.2 tag/search governance gate | v0.3.2.2 | `scripts/v0322_tag_search_governance_release_gate.py` |
 | retired template guard | guard | no `minimal` template in `scripts/`, `README.md`, `docs/development.md` |
 
 Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/workflows/release-dogfood.yml) — manual or weekly; uses `tests/fixtures/v02_dogfood_corpus/` or repo variable `INDB_REAL_CORPUS`.
@@ -50,7 +54,7 @@ Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/
 
 ## Pytest suite (layer A)
 
-**Total:** 314 tests collected in `tests/` (`uv run python -m pytest --collect-only`; 2 deselected by default markers when running the full suite).
+**Total:** 322 tests collected in `tests/` (`uv run python -m pytest --collect-only`; 2 deselected by default markers when running the full suite).
 
 Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["tests"]`, `pythonpath = ["src"]`).
 
@@ -100,6 +104,7 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `test_v032_tag_governance.py` | 22 | v0.3.2 migration, resolution, tagger, accept/reject, relation-backed tag filter |
 | `test_v032_post_ingest_tagging.py` | 2 | Post-ingest tag governance feature flags |
 | `test_v0321_tag_harness.py` | 8 | v0.3.2.1 fixture schema, summary/failure contracts, harness suite |
+| `test_v0322_tag_search_governance.py` | 8 | v0.3.2.2 search filter model, governed `--json`, tag/search harness suite |
 | `test_revisions.py` | 2 | Immutable revision files |
 | `test_documents.py` | 2 | Document metadata |
 | `test_ids.py` | 3 | ID formats |
@@ -132,6 +137,7 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v031_taxonomy_category_release_gate.py` | v0.3.1 | Fixture classifier: zero wrong confident assignments; manual preserve; doctor hard = 0 |
 | `v032_tag_governance_release_gate.py` | v0.3.2 | Fixture tagger: zero wrong auto-attaches; tag filter exact; candidates not filterable; scoped doctor hard = 0 |
 | `v0321_tag_harness_release_gate.py` | v0.3.2.1 | Isolated eval vault harness: hard gates zero; stable summary JSON; report-only precision/recall |
+| `v0322_tag_search_governance_release_gate.py` | v0.3.2.2 | Governed source search harness: AND filters, filter-only snippets, JSON contract, hard gates zero |
 
 Shared helpers: `scripts/gate_common.py`.
 
@@ -164,14 +170,15 @@ uv run python scripts/v02_transition_smoke_gate.py
 ## What passing means (release bar)
 
 ```text
-314 collected / 312 passed (2 skipped by default markers)
+322 collected / 320 passed (2 skipped by default markers)
 compileall clean
 v02 deterministic gate passed
 doctor negative gate passed
 v031 taxonomy category gate passed (when touching taxonomy)
 v032 tag governance gate passed (when touching tag governance)
 v0321 tag harness gate passed (when touching tag harness)
-GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1 gates on ubuntu-latest)
+v0322 tag/search governance gate passed (when touching governed search)
+GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1/v0.3.2.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```
 

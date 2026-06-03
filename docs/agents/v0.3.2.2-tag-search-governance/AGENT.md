@@ -1,0 +1,285 @@
+# v0.3.2.2 Tag/Search Governance Agent Guide
+
+Read this before implementing v0.3.2.2 tag/search governance work.
+
+Canonical spec:
+
+- `docs/planning/v0.3.2.2-tag-search-governance.md`
+
+Required context:
+
+- `AGENTS.md`
+- `CONTEXT.md`
+- `docs/project-status.md`
+- `docs/testing.md`
+- `docs/planning/v0.3.2-tag-governance-foundation.md`
+- `docs/planning/v0.3.2.1-tag-harness-hardening.md`
+- `docs/agents/v0.3.2-tag-governance-foundation/AGENT.md`
+- `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md`
+
+## Objective
+
+Make tag/category/text source search stable, explainable, and regression-tested.
+
+Success means:
+
+```text
+indb search returns trusted current source snippets.
+tag/category/text filters use explicit AND semantics.
+trusted tag filters are relation-backed.
+invalid filters fail clearly.
+valid no-match filters return empty success.
+--json exposes stable explanations for future consoler.
+```
+
+## Scope
+
+Implement only Tag/Search Governance:
+
+- Search Filter Model
+- governed `indb search --category`
+- governed `indb search --tag`
+- `category:<ref>` and `tag:<ref>` prefix normalization
+- filter conflict validation
+- filter-only representative snippets
+- Search Match Explanation
+- Search JSON Contract
+- source safety hard gates
+- tag lifecycle filter semantics
+- category/tag intersection semantics
+- tag/search fixture suite
+- v0.3.2.2 release gate
+- CI C2d job after local pass
+- docs/testing and project-status updates after implementation
+
+Do not implement:
+
+- `ask`
+- `indb retrieve` ranking/package changes
+- providers, embeddings, or network calls
+- vector/hybrid ranking redesign
+- production schema/migration by default
+- parallel search commands
+- TUI or consoler UI
+- doctor repair or automatic rebuild
+- multi-tag OR, multi-category OR, similar-tag expansion, semantic expansion
+- trusted filtering from raw tag strings or FTS tag metadata
+
+## Start Here
+
+Before coding:
+
+```powershell
+git status --short
+rg -n "Tag/Search Governance|Governed Search Path|Search JSON Contract" CONTEXT.md AGENTS.md docs
+rg -n "SearchOptions|search_chunks|parse_tag_search_query|resolve_tag_filter|parse_search_query" src tests scripts
+```
+
+Primary code:
+
+- `src/indbase_core/search.py`
+- `src/indbase_core/tag_search.py`
+- `src/indbase_core/category_taxonomy.py`
+- `src/indbase_cli/main.py`
+
+Existing tests/gates:
+
+- `tests/test_search.py`
+- `tests/test_search_text.py`
+- `tests/test_v032_tag_governance.py`
+- `tests/test_v0321_tag_harness.py`
+- `scripts/v032_tag_governance_release_gate.py`
+- `scripts/v0321_tag_harness_release_gate.py`
+
+Likely new files:
+
+- `src/indbase_core/search_filters.py`
+- `src/indbase_core/search_explanations.py`
+- `tests/test_v0322_tag_search_governance.py`
+- `tests/fixtures/v0322_tag_search_governance/cases.jsonl`
+- `tests/fixtures/v0322_tag_search_governance/README.md`
+- `scripts/v0322_tag_search_governance_release_gate.py`
+
+## Non-Negotiables
+
+- Search remains source search, not ask and not retrieval package evaluation.
+- Extend existing `indb search`; do not add parallel search commands.
+- Category, tag, and text constraints combine as AND.
+- Trusted tag filters must use `document_tags -> tags`.
+- `chunks_fts.tags` and raw metadata strings are not trusted filter authority.
+- Pending/rejected/blocked/stale candidates are not trusted filter sources.
+- Empty result is successful when filters are valid.
+- Invalid filter is a request error with a stable error code.
+- JSON is the machine contract; human output may stay concise.
+- Do not rewrite FTS scoring, chunking, indexing, vector quality, or hybrid ranking.
+- Fixtures must be synthetic or sanitized.
+
+## Execution Slices
+
+### Slice 1: fixtures and tests first
+
+Add:
+
+- `tests/fixtures/v0322_tag_search_governance/README.md`
+- `tests/fixtures/v0322_tag_search_governance/cases.jsonl`
+- `tests/test_v0322_tag_search_governance.py`
+
+Cover:
+
+- exact source hit
+- tag-only filter-only
+- tag/text AND
+- category/tag AND
+- valid no-intersection empty success
+- invalid filter
+- candidate/raw/FTS metadata non-pollution
+- JSON explanation shape
+
+Command:
+
+```powershell
+uv run python -m pytest tests/test_v0322_tag_search_governance.py -q
+```
+
+### Slice 2: filter model and parser
+
+Add or extend a filter layer.
+
+Implement:
+
+- `--category` and `--tag` normalization
+- `category:<ref>` and `tag:<ref>` prefix normalization
+- conflict detection
+- malformed prefix errors
+- category/tag resolution
+- filter warnings
+
+### Slice 3: governed source search
+
+Extend existing search behavior:
+
+- exact source search stays current chunk search
+- filter-only returns representative snippets
+- tag/text/category filters use AND
+- source safety applies to all paths
+- deterministic ordering for filter-only
+- no scoring rewrite
+
+### Slice 4: JSON contract and CLI
+
+Extend existing `indb search`:
+
+- add `--category`
+- preserve `--tag`
+- expose governed `--json`
+- separate `filter_errors`, warnings, and execution errors
+- keep human CLI compact
+
+### Slice 5: doctor and gate
+
+Add read-only doctor diagnostics only if needed.
+
+Add:
+
+```text
+scripts/v0322_tag_search_governance_release_gate.py
+```
+
+Gate must print stable JSON and exit nonzero on hard-gate failures.
+
+### Slice 6: CI and docs
+
+After local pass, add CI:
+
+```text
+tag-search-governance-v0322
+name: C2d - v0.3.2.2 tag/search governance gate
+needs: [test, tag-harness-v0321]
+```
+
+Then update:
+
+- `docs/testing.md`
+- `docs/project-status.md`
+
+Do not update README unless quick-start behavior changes beyond existing `indb search`.
+
+## Hard Gate Coverage
+
+The v0.3.2.2 gate must prove:
+
+- exact source text hits expected current chunk
+- CJK substring fallback still works
+- result bindings include `doc_id`, `revision_id`, `chunk_id`
+- archived documents are excluded
+- old revisions are excluded
+- deleted chunks are excluded
+- output artifacts and candidate shells are excluded
+- tag-only filter-only search returns bounded snippets
+- tag/text search is AND
+- category/tag search is AND
+- valid no-intersection search returns empty success
+- invalid filters fail
+- aliases resolve to canonical tags
+- merged tags resolve to canonical targets
+- deprecated tags search only existing deprecated bindings with warning
+- archived tags are invalid filters
+- candidate/raw/FTS metadata tags do not pollute trusted filters
+- JSON explanation fields are present
+- filter-only ordering is deterministic
+
+## Validation
+
+Focused checks:
+
+```powershell
+uv run python -m pytest tests/test_search.py tests/test_v032_tag_governance.py tests/test_v0321_tag_harness.py tests/test_v0322_tag_search_governance.py -q
+uv run python scripts/v032_tag_governance_release_gate.py
+uv run python scripts/v0321_tag_harness_release_gate.py
+uv run python scripts/v0322_tag_search_governance_release_gate.py
+```
+
+Before declaring complete:
+
+```powershell
+uv run python -m pytest -q
+uv run python -m compileall src tests scripts
+uv run python scripts/v032_tag_governance_release_gate.py
+uv run python scripts/v0321_tag_harness_release_gate.py
+uv run python scripts/v0322_tag_search_governance_release_gate.py
+```
+
+When retrieval behavior is touched:
+
+```powershell
+uv run python scripts/v033_retrieval_eval_release_gate.py
+```
+
+## Done Means
+
+- Existing `indb search` owns the governed CLI surface.
+- `--category`, `--tag`, `category:<ref>`, and `tag:<ref>` share one filter model.
+- Conflict and invalid-filter behavior is explicit.
+- Filter-only source search is bounded and deterministic.
+- Trusted tag filtering is relation-backed.
+- JSON includes normalized query, applied filters, source bindings, snippets, explanations, warnings, and filter errors.
+- v0.3.2.2 release gate passes locally.
+- Focused tests, full pytest, and compileall pass.
+- CI C2d and docs are updated after implementation.
+
+## Completion Report
+
+Report:
+
+- changed files
+- search modules touched
+- CLI options changed
+- fixture cases added
+- JSON fields added
+- doctor findings added, if any
+- gate metrics
+- CI job added, if any
+- tests run
+- tests not run
+- remaining risks
+- confirmation that ask, retrieval ranking, providers, embeddings, vector/hybrid redesign, production schema, parallel search commands, UI, doctor repair, OR/semantic expansion, and untrusted tag-string filtering remain out of scope

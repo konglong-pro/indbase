@@ -426,6 +426,11 @@ def search(
         "--mode",
         help="Search mode: fts, vector, or hybrid.",
     ),
+    category: str | None = typer.Option(
+        None,
+        "--category",
+        help="Filter to documents in a governed category.",
+    ),
     tag: str | None = typer.Option(
         None,
         "--tag",
@@ -438,48 +443,54 @@ def search(
     ),
 ) -> None:
     """Search current source chunks and render citation snippets."""
-    options = _search_options_for_vault(vault, top_k=top_k, mode=mode, tag=tag)
+    options = _search_options_for_vault(vault, top_k=top_k, mode=mode)
     with _existing_vault_connection(vault) as connection:
         try:
-            result = search_chunks(connection, query, options=options)
+            from indbase_core.search import governed_search_chunks
+            from indbase_core.search_explanations import governed_search_to_json
+            from indbase_core.tag_search import SearchFilterError
+
+            governed = governed_search_chunks(
+                connection,
+                query,
+                category=category,
+                tag=tag,
+                options=options,
+            )
+        except SearchFilterError as exc:
+            if json_output:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "query": query,
+                            "normalized_query": "",
+                            "applied_filters": {"category": None, "tag": None},
+                            "filter_errors": [{"code": exc.code, "message": exc.message}],
+                            "warnings": [],
+                            "result_count": 0,
+                            "results": [],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                console.print(f"[red]{exc.message}[/red]")
+            raise typer.Exit(1) from exc
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
 
     if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "query_id": result.query_id,
-                    "query_text": result.query_text,
-                    "result_count": result.result_count,
-                    "results": [
-                        {
-                            "rank": row.rank,
-                            "doc_id": row.doc_id,
-                            "revision_id": row.revision_id,
-                            "chunk_id": row.chunk_id,
-                            "title": row.title,
-                            "source_path": row.source_path,
-                            "snippet": row.snippet,
-                            "score": row.score,
-                            "match_source": row.match_source,
-                        }
-                        for row in result.results
-                    ],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        typer.echo(json.dumps(governed_search_to_json(governed), ensure_ascii=False, indent=2))
         return
 
-    if not result.results:
+    if not governed.results:
         console.print("No results")
         return
 
-    console.print(f"Search: {result.query_text}")
-    for row in result.results:
+    console.print(f"Search: {governed.filters.original_query}")
+    for row in governed.results:
         console.print(f"{row.rank}. {row.match_source}")
         console.print(f"doc_id: {row.doc_id}")
         console.print(f"revision_id: {row.revision_id}")
@@ -3312,24 +3323,16 @@ def _search_options_for_vault(
     *,
     top_k: int | None,
     mode: str = "fts",
-    tag: str | None = None,
 ) -> SearchOptions:
     config_path = vault_path / ".indbase" / "config" / "config.toml"
     search_config = load_config(config_path).search if config_path.is_file() else SearchConfig()
     options = SearchOptions.from_config(search_config)
-    tag_filter_ids = None
-    if tag is not None:
-        with connect(vault_path / ".indbase" / "db.sqlite") as connection:
-            from indbase_core.tag_search import resolve_tag_filter
-
-            tag_filter_ids = resolve_tag_filter(connection, tag).filter_tag_ids
     return SearchOptions(
         top_k=options.top_k if top_k is None else top_k,
         log_queries=options.log_queries,
         persist_search_results=options.persist_search_results,
         cjk_strategy=options.cjk_strategy,
         mode=mode,
-        tag_filter_ids=tag_filter_ids,
     )
 
 

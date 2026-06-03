@@ -1,7 +1,7 @@
 # indbase Project Status
 
 **As of:** 2026-06-03
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, and v0.3.2.1 tag harness hardening)
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, and v0.3.2.2 tag/search governance)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -17,6 +17,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.3.1 taxonomy category foundation** | **Active expansion — implemented (core)**; `indbase_default_v1` catalog, profiles/localizations, auditable classification runs, post-ingest taxonomy (`features.category_taxonomy`), category search filter, doctor checks, fixture gate |
 | **v0.3.2 tag governance foundation** | **Active expansion — implemented (core)**; migration `0011`, tag resolution/admission/budget/blocklist, deterministic tagger, candidate accept/reject + feedback/audit, relation-backed tag search filter, post-ingest tagging flags (`features.tag_governance`, `features.post_ingest_tagging`), doctor checks, fixture gate + CI job |
 | **v0.3.2.1 tag harness hardening** | **Active expansion — implemented (core)**; fixture schema + sanitized suite, isolated eval vault runner (`tag_harness_eval`), stable summary/failure JSON, hard gates, report-only precision/recall, release gate + CI job C2c |
+| **v0.3.2.2 tag/search governance** | **Active expansion — implemented (core)**; Search Filter Model, governed `indb search --category`/`--tag`/`--json`, filter-only representative snippets, match explanations, fixture harness + CI job C2d |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -35,6 +36,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.3.1 category foundation spec | `docs/planning/v0.3.1-taxonomy-category-foundation.md` |
 | v0.3.2 tag governance spec | `docs/planning/v0.3.2-tag-governance-foundation.md` |
 | v0.3.2.1 tag harness spec | `docs/planning/v0.3.2.1-tag-harness-hardening.md` |
+| v0.3.2.2 tag/search governance spec | `docs/planning/v0.3.2.2-tag-search-governance.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -222,13 +224,33 @@ policy_mutations_by_harness
 
 **Out of scope:** formal `indb tag harness` CLI, production schema/migrations, providers/embeddings, search ranking changes, retrieval/`ask`, automatic policy mutation, raw private fixture commits.
 
+## v0.3.2.2 tag/search governance (implemented core)
+
+- **Spec:** `docs/planning/v0.3.2.2-tag-search-governance.md`
+- **Agent guide:** `docs/agents/v0.3.2.2-tag-search-governance/AGENT.md`
+
+**Delivered in core/tests/scripts:**
+
+- `src/indbase_core/search_filters.py` — normalized filter model (CLI flags + `category:`/`tag:` prefixes, conflict validation)
+- `src/indbase_core/search_explanations.py` — governed Search JSON contract
+- `governed_search_chunks()` + filter-only representative snippets in `search.py`
+- `resolve_governed_tag_filter()` lifecycle semantics in `tag_search.py` (deprecated bindings, archived invalid)
+- CLI: `indb search --category`, governed `--tag`, stable `--json`
+- Fixture suite `tests/fixtures/v0322_tag_search_governance/` + `tag_search_governance_eval.py`
+- Gate: `scripts/v0322_tag_search_governance_release_gate.py`; CI job **C2d — v0.3.2.2 tag/search governance gate** (`needs: [test, tag-harness-v0321]`)
+- Tests: `tests/test_v0322_tag_search_governance.py`
+
+**Hard gates:** source exact hits, relation-backed tag filters only, category/tag/text AND, valid empty success, invalid filter errors, stable JSON contract, deterministic filter-only ordering.
+
+**Out of scope:** `ask`, retrieval ranking changes, providers/embeddings, production schema by default, parallel search commands, TUI, doctor repair, OR/semantic expansion.
+
 ## Release gates and CI (current)
 
 **Canonical gate doc:** `docs/planning/v0.2-release-gate-checkpoint.md`
 
 | Layer | What | PR blocker on GitHub |
 | --- | --- | --- |
-| A | `pytest` (314 collected) | Yes |
+| A | `pytest` (322 collected) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |

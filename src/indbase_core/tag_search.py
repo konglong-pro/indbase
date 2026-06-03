@@ -7,6 +7,15 @@ import sqlite3
 
 from indbase_core.tag_resolution import resolve_canonical_tag_id, resolve_tag_candidate
 
+class SearchFilterError(ValueError):
+    """Invalid tag filter for governed source search."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 TRUSTED_DOCUMENT_TAG_SOURCES: frozenset[str] = frozenset(
     {
         "manual",
@@ -28,6 +37,16 @@ class TagFilterResolution:
     resolved_from_merged: bool
 
 
+@dataclass(frozen=True)
+class GovernedTagFilterResolution:
+    tag_ref: str
+    canonical_tag_id: str
+    filter_tag_ids: tuple[str, ...]
+    via_alias: bool
+    resolved_from_merged: bool
+    deprecated: bool
+
+
 def parse_tag_search_query(raw_query: str) -> tuple[str | None, str]:
     """Parse optional tag:<ref> prefix from a search query."""
     text = raw_query.strip()
@@ -47,6 +66,87 @@ def parse_tag_search_query(raw_query: str) -> tuple[str | None, str]:
     tag_ref = parts[0]
     query = parts[1].strip() if len(parts) > 1 else ""
     return tag_ref, query
+
+
+def resolve_governed_tag_filter(
+    connection: sqlite3.Connection,
+    tag_ref: str,
+) -> GovernedTagFilterResolution:
+    """Resolve tag filters for governed source search with lifecycle semantics."""
+    clean = " ".join(tag_ref.strip().split())
+    if not clean:
+        raise SearchFilterError("empty_tag_filter", "Tag filter must not be empty.")
+
+    if clean.startswith("tag_"):
+        row = connection.execute(
+            """
+            SELECT tag_id, name, status
+            FROM tags
+            WHERE tag_id = ?
+              AND deleted_at IS NULL
+            """,
+            (clean,),
+        ).fetchone()
+        if row is None:
+            raise SearchFilterError("unknown_tag", f"Unknown tag filter: {tag_ref}")
+        status = str(row["status"])
+        if status == "archived":
+            raise SearchFilterError("archived_tag", f"Tag filter references archived tag: {tag_ref}")
+        resolution = resolve_tag_candidate(connection, str(row["name"]))
+        resolved_tag_id = str(row["tag_id"])
+    else:
+        resolution = resolve_tag_candidate(connection, clean)
+        resolved_tag_id = resolution.resolved_tag_id
+
+    if resolution.outcome == "blocked":
+        raise SearchFilterError("blocked_tag", f"Tag filter is blocked: {tag_ref}")
+    if resolution.outcome == "archived":
+        raise SearchFilterError("archived_tag", f"Tag filter references archived tag: {tag_ref}")
+    if resolution.outcome == "propose_new" or resolution.canonical_tag_id is None:
+        raise SearchFilterError("unknown_tag", f"Unknown tag filter: {tag_ref}")
+
+    if resolution.outcome == "deprecated":
+        tag_id = resolved_tag_id or resolution.canonical_tag_id
+        if not tag_id:
+            raise SearchFilterError("unknown_tag", f"Unknown tag filter: {tag_ref}")
+        return GovernedTagFilterResolution(
+            tag_ref=clean,
+            canonical_tag_id=tag_id,
+            filter_tag_ids=(tag_id,),
+            via_alias=resolution.via_alias,
+            resolved_from_merged=False,
+            deprecated=True,
+        )
+
+    canonical_id = resolution.canonical_tag_id
+    filter_ids = tuple(
+        sorted(
+            {
+                str(row["tag_id"])
+                for row in connection.execute(
+                    """
+                    SELECT tag_id
+                    FROM tags
+                    WHERE deleted_at IS NULL
+                      AND status != 'archived'
+                      AND (tag_id = ? OR merged_into_tag_id = ?)
+                    """,
+                    (canonical_id, canonical_id),
+                )
+            }
+        )
+    )
+    if not filter_ids:
+        raise SearchFilterError("unknown_tag", f"Unknown tag filter: {tag_ref}")
+
+    return GovernedTagFilterResolution(
+        tag_ref=clean,
+        canonical_tag_id=canonical_id,
+        filter_tag_ids=filter_ids,
+        via_alias=resolution.via_alias,
+        resolved_from_merged=resolution.outcome == "merged",
+        deprecated=False,
+    )
 
 
 def resolve_tag_filter(connection: sqlite3.Connection, tag_ref: str) -> TagFilterResolution:

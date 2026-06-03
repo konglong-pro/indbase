@@ -380,6 +380,150 @@ _Avoid_: tag filter, full-text category mention
 A relationship-backed search constraint that returns only documents or chunks attached to a resolved **Formal Tag**.
 _Avoid_: full-text tag mention, candidate tag match, raw FTS tag string
 
+**FTS Tag Metadata Non-Authority**:
+The rule that FTS tag metadata text may support display or broad full-text search, but cannot be used as the authority for trusted tag filtering.
+_Avoid_: metadata-string filter, raw tag search as trusted filter
+
+**Trusted Document Tag Source**:
+A document-tag relationship source that may participate in trusted tag filtering: manual, accepted candidate, auto, or legacy classification.
+_Avoid_: pending candidate, rejected candidate, blocked candidate, raw metadata
+
+**Tag/Search Governance**:
+The v0.3.2.2 phase that governs combined tag and search behavior after tag governance foundation and tag harness hardening, without replacing retrieval evaluation or implementing ask.
+_Avoid_: retrieval evaluation, ask readiness, broad retrieval rewrite
+
+**Tag/Search Governance Harness**:
+The v0.3.2.2 evaluation workflow that validates governed source search paths, filter semantics, non-pollution, explanations, and deterministic ordering.
+_Avoid_: tag governance harness, retrieval evaluation harness, ask evaluation
+
+**Sanitized Tag/Search Fixture**:
+A synthetic or redacted source-search fixture that preserves tag/search governance behavior while removing private document content before it is committed to the repository.
+_Avoid_: raw vault excerpt, private exact quote, unsanitized dogfood case
+
+**Tag/Search Governance Gate**:
+The release-blocking verification that runs the **Tag/Search Governance Harness** before broader retrieval or ask work depends on governed tag/search behavior.
+_Avoid_: local-only smoke, retrieval eval gate
+
+**Tag/Search Governance CI Gate**:
+The pull-request CI job that runs the v0.3.2.2 tag/search governance release gate after the v0.3.2.1 tag harness gate and before retrieval gates depend on governed search behavior.
+_Avoid_: local-only search smoke, unordered CI gate
+
+**Source Search Hard Gate**:
+A zero-tolerance v0.3.2.2 release check proving exact source text search still returns trusted current source chunks with stable source bindings.
+_Avoid_: broad retrieval score, semantic recall metric
+
+**Search Source Safety Gate**:
+A zero-tolerance v0.3.2.2 release check proving governed source search returns only active documents, current trusted source revisions, current chunks, and trusted document-tag/category state.
+_Avoid_: archived document leakage, old revision leakage, output artifact search, candidate source shell search
+
+**Schema-Neutral Search Governance**:
+A v0.3.2.2 constraint that governed tag/search behavior should be implemented through existing source, category, tag, document-tag, and chunk state before adding production vault schema.
+_Avoid_: search audit migration by default, persisted query history
+
+**Deterministic Search Governance**:
+A local, repeatable v0.3.2.2 constraint where hard gates use deterministic source search behavior and do not depend on embeddings, providers, vector quality, or hybrid ranking changes.
+_Avoid_: embedding-backed gate, provider-dependent search, hybrid ranking redesign
+
+**Tag/Search Governance Validation Suite**:
+The required command set for validating v0.3.2.2, including focused search/tag/harness tests, v0.3.2/v0.3.2.1/v0.3.2.2 gates, full pytest, compileall, and retrieval-eval regression when retrieval behavior is touched.
+_Avoid_: single smoke test, unchecked CLI demo
+
+**Tag/Search Governance Non-Goals**:
+The explicit v0.3.2.2 out-of-scope boundary excluding ask, retrieval package/ranking changes, providers, embeddings, vector/hybrid ranking redesign, production schema by default, parallel search commands, UI, doctor repair, OR/semantic expansion, and untrusted tag-string filtering.
+_Avoid_: hidden ask phase, retrieval rewrite, search engine rewrite
+
+**Governed Search Path**:
+A supported search route whose filter semantics, source binding, match explanation, and non-pollution rules are explicit and regression-tested.
+_Avoid_: best-effort query behavior, hidden retrieval logic, ask
+
+**Source Search**:
+Search that returns trusted source snippets tied to current source chunks rather than generated answers, retrieval packages, or derived artifacts.
+_Avoid_: retrieve, ask, summary search, output artifact search
+
+**Tag/Text Search**:
+A governed search path that combines a resolved **Tag Search Filter** with a full-text query over trusted current source chunks.
+_Avoid_: raw tag-string FTS match, candidate tag search, semantic retrieval
+
+**Search Filter Model**:
+The normalized internal representation of structured category/tag filters parsed from CLI flags or query prefixes before source search runs.
+_Avoid_: separate CLI semantics, string-only parser state
+
+**Search Query Prefix Filter**:
+A shortcut filter syntax inside a query string, such as `tag:<ref>` or `category:<ref>`, that must normalize into the same **Search Filter Model** as structured CLI flags.
+_Avoid_: independent filter logic, hidden OR syntax
+
+**Category/Tag Search**:
+A governed search path that combines a **Category Search Filter** with a resolved **Tag Search Filter** over trusted current source documents.
+_Avoid_: multiple big categories, raw metadata match, broad retrieval package
+
+**Category/Tag Intersection Gate**:
+A v0.3.2.2 hard gate proving category and tag filters use AND semantics, return only documents satisfying both filters, and treat valid no-intersection searches as successful empty results.
+_Avoid_: category-only fallback, tag-only fallback, invalid-filter conflation
+
+**Conjunctive Search Filters**:
+The rule that category, tag, and text constraints combine with explicit AND semantics in governed source search.
+_Avoid_: implicit OR, hidden query expansion, similar-tag expansion
+
+**Filter-Only Source Search**:
+A governed source search with category and/or tag filters but no text query, returning representative current source snippets while clearly reporting the active filters.
+_Avoid_: unbounded browse, candidate search, generated summary
+
+**Representative Source Snippet**:
+A bounded snippet selected from a trusted current source document when a filter-only search has no exact text match to anchor the result.
+_Avoid_: all chunks, generated summary, arbitrary document preview
+
+**Deterministic Search Ordering**:
+The governed rule that source search results must be stable for the same vault state and query without introducing new semantic reranking.
+_Avoid_: ranking rewrite, provider score, nondeterministic ordering
+
+**Search Match Explanation**:
+A structured explanation of why a search result matched, including applied filters, resolved tag/category identities, text match source, chunk binding, and warnings.
+_Avoid_: opaque ranking score, generated answer, unsupported inference
+
+**Search Explanation JSON Contract**:
+The stable machine-readable search result explanation used by `--json`, including applied filters, resolved tag/category identities, text and filter match details, chunk/document/revision bindings, and warnings.
+_Avoid_: human table parsing, localized prose contract
+
+**Search JSON Contract**:
+The stable machine-readable response shape for governed `indb search --json`, including normalized query, applied filters, filter errors, result count, source bindings, snippets, explanations, and warnings.
+_Avoid_: Rich table parsing, consoler-specific UI state, generated answer format
+
+**Governed Search CLI Surface**:
+The v0.3.2.2 command boundary that extends existing `indb search` with governed category/tag filters and JSON output without adding parallel search commands.
+_Avoid_: tag-search command, browse command, retrieve rewrite
+
+**Search Filter/Explanation Layer**:
+The implementation boundary that may normalize filters, validate filter conflicts, and build structured explanations without rewriting chunk scoring, chunking, indexing, or retrieval ranking.
+_Avoid_: search engine rewrite, FTS scoring redesign, retrieval package logic
+
+**Tag/Search Doctor Finding**:
+A health finding about governed source search, tag filter resolution, category/tag filter composition, FTS tag metadata consistency, or candidate/raw tag pollution.
+_Avoid_: automatic repair, hidden rebuild, search ranking advice
+
+**Tag Filter Lifecycle Semantics**:
+The governed search rules for canonical, alias, merged, deprecated, and archived tag references in a **Tag Search Filter**.
+_Avoid_: lifecycle-blind search, archived tag leakage
+
+**Deprecated Tag Search Binding**:
+A trusted search behavior where a deprecated tag reference may query existing document-tag bindings to that deprecated tag itself, with warnings, without expanding to canonical targets or migrating links.
+_Avoid_: automatic link migration, deprecated-to-canonical expansion
+
+**Invalid Search Filter**:
+A category or tag filter reference that cannot participate in trusted source search because it is unknown, blocked, archived, candidate-only, or otherwise outside governed metadata.
+_Avoid_: zero-result search, low-confidence match
+
+**Search Filter Error**:
+A parse or validation failure in a requested search filter, such as unknown filter reference, conflicting filters, malformed quoted prefix, candidate tag reference, or archived tag reference.
+_Avoid_: execution error, empty result
+
+**Search Execution Error**:
+A failure to execute governed source search after filters were valid, such as database, FTS, index, or unexpected service failure.
+_Avoid_: filter error, no matching document
+
+**Empty Governed Search Result**:
+A successful governed source search where valid filters and/or text constraints match no current trusted source snippets.
+_Avoid_: invalid filter, execution error
+
 **Taxonomy Execution Error**:
 A failure to complete the classification workflow itself, distinct from an intentional **Abstain**.
 _Avoid_: abstain, low confidence
@@ -453,6 +597,8 @@ _Avoid_: top score only
 - **Category Search Filter** belongs to the category foundation phase; tag-aware search belongs to **Tag Governance**.
 - A **Tag Search Filter** is authoritative only when it follows `document_tags` through resolved **Formal Tags**.
 - Full-text matches against tag metadata can help broad search, but they are not a trusted **Tag Search Filter**.
+- **FTS Tag Metadata Non-Authority** means `chunks_fts.tags` or metadata tag strings must never determine trusted tag-filter membership.
+- A **Trusted Document Tag Source** may be `manual`, `accepted_candidate`, `auto`, or `legacy_classification`; pending, rejected, blocked, stale, or raw candidates are not trusted filter sources.
 - **Tag Feedback** is explicit audit data, not a hidden training signal.
 - **Tag Governance Events** explain why tag resolution, search, alias, merge, scope, or lifecycle behavior changed.
 - The **Tag Harness** evaluates approved tag policy and feedback-derived cases before release.
@@ -500,6 +646,42 @@ _Avoid_: top score only
 - A **Tag Doctor Finding** reports correctness issues as hard findings and tag-sprawl risks as warnings; doctor does not merge, delete, promote, or repair tags automatically.
 - A **Tag Harness Doctor Boundary** keeps release regression separate from real-vault diagnosis: harness runs fixture behavior checks, while doctor may report tag integrity, lifecycle, candidate-resolution, sprawl, and filter-health issues without executing the full fixture suite.
 - A **Tag Harness Completion Boundary** means v0.3.2.1 proves tag governance regressions can be caught; it does not complete ranking, combined filter behavior, search UX, retrieval packages, or `ask` readiness.
+- **Tag/Search Governance** follows **Tag Harness Hardening** as v0.3.2.2 and owns governed tag/search composition, not v0.3.3 retrieval evaluation or `ask`.
+- **Tag/Search Governance** stabilizes **Governed Search Paths** for original text search, **Tag Search Filter**, **Tag/Text Search**, and **Category/Tag Search**.
+- A **Tag/Search Governance Harness** is separate from **Tag Harness Hardening**: it evaluates source search paths and filter composition rather than tag candidate generation or tag policy behavior.
+- Repository fixtures for the **Tag/Search Governance Harness** must be **Sanitized Tag/Search Fixtures**; raw private vault snippets or unsanitized dogfood cases must not be committed.
+- A **Tag/Search Governance Gate** must cover original text search, filter-only tag search, tag/text AND search, category/tag AND search, lifecycle filter behavior, invalid-filter versus empty-result behavior, candidate/raw-tag non-pollution, explanation JSON, and deterministic ordering.
+- A **Tag/Search Governance CI Gate** should run after the v0.3.2.1 tag harness CI gate and before broader retrieval/ask work relies on governed tag/search behavior.
+- A **Source Search Hard Gate** must prove exact phrase or source substring search returns the expected current chunk, archived documents and old revisions stay out of default search, result source bindings include `doc_id`, `revision_id`, and `chunk_id`, and CJK substring fallback still works under governed filters.
+- A **Search Source Safety Gate** must prove governed source search does not return archived documents, deleted chunks, non-current revisions, derived output artifacts, review/promotion candidate source shells, or archived/deleted tag relation leakage.
+- **Schema-Neutral Search Governance** should use existing source, category, tag, document-tag, and chunk state by default; v0.3.2.2 should not add production migrations unless implementation proves existing state cannot support governed source search.
+- **Deterministic Search Governance** keeps v0.3.2.2 hard gates on deterministic source search, usually FTS plus current substring fallback; embeddings, providers, vector quality, and hybrid ranking changes are out of scope.
+- The **Tag/Search Governance Validation Suite** includes focused search/tag/harness tests, the v0.3.2 tag governance gate, the v0.3.2.1 tag harness gate, the v0.3.2.2 tag/search governance gate, full pytest, compileall, and v0.3.3 retrieval eval regression when retrieval behavior is touched.
+- **Tag/Search Governance Non-Goals** must be listed in the v0.3.2.2 execution plan so the phase does not absorb `ask`, retrieval package ranking, providers, embeddings, vector/hybrid redesign, production schema design, parallel search commands, UI, doctor repair, OR/semantic expansion, or untrusted tag-string filtering.
+- A **Category/Tag Intersection Gate** must prove documents satisfying only one of category or tag are excluded, documents satisfying both are included, valid no-intersection queries return empty success, and explanations show both filters were applied.
+- A **Governed Search Path** must return source snippets tied to current trusted chunks and must explain applied filters and match sources through a **Search Match Explanation**.
+- **Tag/Text Search** and **Category/Tag Search** must use resolved **Formal Tags** and trusted category assignments, not raw tag strings, candidate tags, or full-text metadata coincidences.
+- A **Tag/Search Governance Gate** must include a case where FTS tag metadata mentions a tag but `document_tags` lacks the trusted relationship, proving `--tag` does not return that document.
+- **Search Match Explanation** should expose the **Trusted Document Tag Source** behind a trusted tag-filter match when available.
+- v0.3.2.2 governs **Source Search** only; retrieval packages, answer readiness, generated answers, and `ask` remain owned by later retrieval/ask phases.
+- **Conjunctive Search Filters** are mandatory for v0.3.2.2: category, tag, and text constraints combine as AND, without implicit OR, semantic expansion, similar-tag expansion, or candidate-tag participation.
+- CLI flags such as `--tag` and `--category` and **Search Query Prefix Filters** such as `tag:<ref>` and `category:<ref>` must normalize into one **Search Filter Model** before execution.
+- Structured CLI filters have highest precedence; conflicting CLI and prefix filters are **Invalid Search Filters**, while equivalent filters may be deduplicated.
+- **Search Query Prefix Filters** that contain spaces must use explicit quoting, and v0.3.2.2 does not introduce multi-tag OR, multi-category OR, or similar-tag syntax.
+- **Filter-Only Source Search** is allowed for trusted category/tag filters with no text query, but it must report active filters and return bounded representative current source snippets.
+- **Filter-Only Source Search** defaults to document-level **Representative Source Snippets**, not all matching chunks.
+- **Deterministic Search Ordering** is required: text queries may keep existing FTS relevance ordering, while filter-only searches must use a stable document/chunk ordering; v0.3.2.2 does not introduce new boost, rerank, or semantic score policy.
+- A **Search Match Explanation** must be exposed through a stable **Search Explanation JSON Contract**; human CLI output may show a concise explanation but must not be the machine contract.
+- **Search JSON Contract** is the future consoler-facing contract for governed `indb search --json`; v0.3.2.2 does not implement TUI or consoler UI.
+- The **Governed Search CLI Surface** extends existing `indb search` with `--category`, governed `--tag`, prefix parsing, and stable `--json`; it does not add parallel search commands or rewrite `indb retrieve`.
+- v0.3.2.2 may introduce a **Search Filter/Explanation Layer** or narrowly extend existing search modules, but it must not rewrite FTS scoring, chunking, indexing, retrieval ranking, or retrieval package logic.
+- A **Tag/Search Doctor Finding** diagnoses governed source-search integrity problems such as stale trusted tag metadata, broken filter resolution, category/tag relation inconsistency, or candidate/raw tag pollution; doctor must not repair, rebuild, retag, or rerank automatically.
+- **Tag Filter Lifecycle Semantics** allow active canonical tags, active aliases, and merged-tag references to resolve to the canonical tag for trusted filtering; deprecated tag references may query existing bindings with warnings; archived tag references are excluded from trusted filtering by default.
+- A **Deprecated Tag Search Binding** queries only existing document-tag bindings for the deprecated tag itself and does not expand to canonical targets or run link migration.
+- **Search Match Explanation** must indicate alias resolution, merged-tag resolution, deprecated warnings, and archived-tag exclusion when those lifecycle states affect a search.
+- An **Invalid Search Filter** is a user/request error and should fail explicitly with a stable error code; an **Empty Governed Search Result** is a successful search with no matches and should return an empty result set plus explanation.
+- Unknown, blocked, archived, or candidate-only tag references are **Invalid Search Filters** for trusted source search.
+- **Search Filter Errors** and **Search Execution Errors** must be represented separately in governed search output; an **Empty Governed Search Result** must not be reported as either kind of error.
 - **Tag Harness Non-Goals** must be listed in the v0.3.2.1 execution plan so the harness phase does not absorb formal CLI design, production schema design, provider intelligence, broader search governance, ingest validation, or automatic policy mutation.
 - The **Tag Harness Coverage Matrix** must include **User-Curated Tag State**, proving that user-added active canonical tags, edited aliases, and scoped tags are evaluated through current formal metadata rather than default seed tags only.
 - A **Taxonomy Execution Error** is an issue; an intentional **Abstain** is a valid classification outcome.
