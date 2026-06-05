@@ -1,0 +1,347 @@
+{
+  "agent_id": "indbase",
+  "name": "indbase",
+  "version": "0.1.0",
+  "protocol_version": "0",
+  "artifact_retrieval": {
+    "uri_schemes": ["indbase"],
+    "kinds": [
+      "indbase.ingest_run",
+      "indbase.document",
+      "indbase.review_item",
+      "indbase.task",
+      "indbase.error",
+      "indbase.doctor_report"
+    ]
+  },
+  "commands": [
+    {
+      "name": "indbase.doctor",
+      "description": "Run integrity checks against an indbase vault.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path"],
+        "properties": {
+          "vault_path": {
+            "type": "string",
+            "description": "Path to an existing indbase vault."
+          }
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_files", "read_vault_database", "read_vault_config"],
+      "permissions": [
+        {
+          "kind": "read_files",
+          "scope": "vault",
+          "description": "Read vault files, config, and SQLite metadata during doctor checks."
+        },
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read vault SQLite metadata during doctor checks."
+        }
+      ]
+    },
+    {
+      "name": "indbase.ingest_file",
+      "description": "Ingest one local file into an indbase vault.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path", "source_path"],
+        "properties": {
+          "vault_path": {
+            "type": "string",
+            "description": "Path to an existing indbase vault."
+          },
+          "source_path": {
+            "type": "string",
+            "description": "Path to one local source file."
+          }
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "probe_readonly",
+        "requires_approval_before_preview": true,
+        "preview_side_effects": ["read_source_file", "read_vault_database"],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_source_file", "write_vault_database", "write_vault_files", "read_vault_config"],
+      "permissions": [
+        {
+          "kind": "read_files",
+          "scope": "source",
+          "description": "Read the selected source file during preview and ingest."
+        },
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read vault SQLite metadata for duplicate detection and ingest planning."
+        },
+        {
+          "kind": "write_database",
+          "scope": "vault",
+          "description": "Write task, ingest, document, revision, chunk, review, error, and index metadata."
+        },
+        {
+          "kind": "write_files",
+          "scope": "vault",
+          "description": "Write archived originals, candidate artifacts, and trusted source Markdown revisions."
+        }
+      ]
+    },
+    {
+      "name": "indbase.search_sources",
+      "description": "Search trusted current source snippets with optional governed category/tag filters.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path", "query"],
+        "properties": {
+          "vault_path": {
+            "type": "string",
+            "description": "Path to an existing indbase vault."
+          },
+          "query": {
+            "type": "string",
+            "description": "Source text query. Empty is valid only with category or tag filters."
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional governed Big Category filter."
+          },
+          "tag": {
+            "type": "string",
+            "description": "Optional governed Formal Tag filter."
+          },
+          "top_k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5
+          }
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read trusted current source chunks and governed category/tag metadata."
+        }
+      ]
+    },
+    {
+      "name": "indbase.review_list",
+      "description": "List review queue items without mutating them.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path"],
+        "properties": {
+          "vault_path": {"type": "string"},
+          "status": {"type": "string", "default": "pending"},
+          "type": {"type": "string"},
+          "target_type": {"type": "string"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read review queue metadata without mutating review state."
+        }
+      ]
+    },
+    {
+      "name": "indbase.review_show",
+      "description": "Show one review queue item without resolving it.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path", "review_id"],
+        "properties": {
+          "vault_path": {"type": "string"},
+          "review_id": {"type": "string"}
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read one review queue item without mutating review state."
+        }
+      ]
+    },
+    {
+      "name": "indbase.task_list",
+      "description": "List recent task records without changing task state.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path"],
+        "properties": {
+          "vault_path": {"type": "string"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read task metadata without mutating task state."
+        }
+      ]
+    },
+    {
+      "name": "indbase.task_show",
+      "description": "Show one task and its events without changing task state.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path", "task_id"],
+        "properties": {
+          "vault_path": {"type": "string"},
+          "task_id": {"type": "string"}
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read one task and task events without mutating task state."
+        }
+      ]
+    },
+    {
+      "name": "indbase.error_list",
+      "description": "List recorded errors without mutating vault state.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path"],
+        "properties": {
+          "vault_path": {"type": "string"},
+          "component": {"type": "string"},
+          "severity": {"type": "string"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read recorded error metadata without mutating vault state."
+        }
+      ]
+    },
+    {
+      "name": "indbase.error_show",
+      "description": "Show one recorded error without mutating vault state.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path", "error_id"],
+        "properties": {
+          "vault_path": {"type": "string"},
+          "error_id": {"type": "string"}
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read one recorded error without mutating vault state."
+        }
+      ]
+    },
+    {
+      "name": "indbase.doc_show",
+      "description": "Show bounded trusted metadata and current source preview for one document ID.",
+      "args_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vault_path", "doc_id"],
+        "properties": {
+          "vault_path": {"type": "string"},
+          "doc_id": {"type": "string"}
+        }
+      },
+      "preview_policy": {
+        "preview_kind": "static",
+        "requires_approval_before_preview": false,
+        "preview_side_effects": [],
+        "invalidates_on_context_change": true
+      },
+      "side_effects": ["read_vault_files", "read_vault_database"],
+      "permissions": [
+        {
+          "kind": "read_database",
+          "scope": "vault",
+          "description": "Read trusted document metadata, current revision, category, and formal tags."
+        },
+        {
+          "kind": "read_files",
+          "scope": "vault",
+          "description": "Read a bounded preview from the current trusted source Markdown revision."
+        }
+      ]
+    }
+  ]
+}

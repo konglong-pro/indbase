@@ -344,6 +344,46 @@ _Avoid_: tag governance candidate, formal tag
 Stable JSON command output designed so future consoler UI can call core workflows without parsing human CLI tables.
 _Avoid_: TUI implementation, Rich table contract, UI business logic
 
+**Artifact-First Read-Only View**:
+A bounded, agent-owned consoler artifact view for trusted indbase objects that are already exposed by read-only Source Trust Loop commands, without adding mutation workflows, vault browsing, or direct consoler access to vault files or database state.
+_Avoid_: command-screen contract, full TUI page, vault browser, direct DB reader
+
+**Read-Only View Object Set**:
+The first bounded consoler view set for Source Trust Loop dogfood, covering document, review item, task, error, and doctor report objects before broader ingest-run, converter-run, output-artifact, or revision browsing.
+_Avoid_: full history browser, conversion pipeline browser, generated artifact gallery
+
+**Current-State Artifact View**:
+A read-only artifact view whose URI identifies an indbase object and whose body is resolved from the current vault state when opened, with immutable source bindings preserved where the originating command supplied them.
+_Avoid_: durable action snapshot, consoler-owned business cache, replayed historical UI state
+
+**Opaque Indbase Artifact URI**:
+An `indbase://...` identifier that names an agent-owned indbase object or view capability without exposing local file paths, SQL selectors, title/path lookup, globbing, or direct vault access as the lookup authority.
+_Avoid_: file URI, vault path as capability, query language in artifact URI
+
+**Ephemeral Doctor Report View**:
+A read-only consoler artifact view that resolves the current vault health on demand without adding durable doctor-run storage or repair behavior.
+_Avoid_: doctor history table, repair workflow, persisted diagnostic ledger
+
+**Bounded View Budget**:
+The fixed first-version size limits for read-only artifact views, reported in each view response through `limits` and `truncated` fields instead of user-configurable display settings.
+_Avoid_: full source viewer, unlimited trace viewer, vault browser
+
+**Show-Command Artifact Boundary**:
+The first-version rule that list commands return bounded rows only, while show commands and primary source-search or doctor commands expose read-only artifact blocks for focused object inspection.
+_Avoid_: artifact spam, list-as-browser, row-level artifact flooding
+
+**Read-Only View Contract Test Boundary**:
+The verification boundary where indbase agent artifact contracts carry the release risk, while consoler discovery, command run, and artifact-view calls remain smoke/conformance checks unless protocol or renderer code changes.
+_Avoid_: renderer-driven acceptance, protocol rewrite, UI snapshot as source of truth
+
+**Agent Projection Layer**:
+The `indbase_agent` boundary that turns core read-only data into consoler command results, artifact blocks, artifact URI handling, bounded view envelopes, and display metadata without importing consoler concepts into `indbase_core`.
+_Avoid_: consoler SDK in core, UI contract in service layer, direct DB access from consoler
+
+**Artifact View Error Semantics**:
+The stable failure contract for read-only artifact views where invalid URI shape, unsupported artifact kind, missing object, scope rejection, uninitialized vault, and generation failure return explicit errors instead of empty successful views.
+_Avoid_: empty success for errors, ambiguous not found, silent scope bypass
+
 **Tag Policy Suggestion**:
 A reviewable proposal to change tag aliases, merges, deprecations, blocklists, scopes, or admission policy.
 _Avoid_: automatic policy change, hidden learning
@@ -439,6 +479,10 @@ _Avoid_: best-effort query behavior, hidden retrieval logic, ask
 **Source Search**:
 Search that returns trusted source snippets tied to current source chunks rather than generated answers, retrieval packages, or derived artifacts.
 _Avoid_: retrieve, ask, summary search, output artifact search
+
+**Source Trust Loop**:
+The dogfood workflow that proves a local source can move from ingest through visible task/error/review state, trusted category/tag metadata, governed source search, source binding inspection, and doctor verification without confusing candidates, generated artifacts, or answers with trusted current source revisions.
+_Avoid_: full product UI, generated output loop, ask workflow, unbounded vault browser
 
 **Tag/Text Search**:
 A governed search path that combines a resolved **Tag Search Filter** with a full-text query over trusted current source chunks.

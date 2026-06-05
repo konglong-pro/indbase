@@ -1,6 +1,6 @@
 # Testing and Release Verification
 
-**As of:** 2026-06-03
+**As of:** 2026-06-05
 
 This document is the **canonical summary of what is tested and what must pass** for day-to-day development and release. For delivery scope see [project-status.md](project-status.md). For gate policy see [planning/v0.2-release-gate-checkpoint.md](planning/v0.2-release-gate-checkpoint.md).
 
@@ -28,6 +28,12 @@ uv run python scripts/v0321_tag_harness_release_gate.py
 # v0.3.2.2 tag/search governance (when touching governed search)
 uv run python scripts/v0322_tag_search_governance_release_gate.py
 
+# v0.3.2.3a consoler probe stabilization (when touching indbase_agent)
+uv run python scripts/v0323a_probe_stabilization_release_gate.py
+
+# v0.3.2.3b consoler read-only views (when touching indbase_agent)
+uv run python scripts/v0323b_consoler_readonly_views_release_gate.py
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -54,7 +60,7 @@ Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/
 
 ## Pytest suite (layer A)
 
-**Total:** 322 tests collected in `tests/` (`uv run python -m pytest --collect-only`; 2 deselected by default markers when running the full suite).
+**Total:** 342 tests collected in `tests/` (`uv run python -m pytest --collect-only`; environment-gated smoke tests skip unless their prerequisites are enabled).
 
 Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["tests"]`, `pythonpath = ["src"]`).
 
@@ -109,7 +115,8 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `test_documents.py` | 2 | Document metadata |
 | `test_ids.py` | 3 | ID formats |
 | `test_imports.py` | 1 | Package import smoke |
-| `test_indbase_agent.py` | 19 | Agent adapter previews, ingest execution blocks, cancellation, duplicate interaction, artifact views |
+| `test_indbase_agent.py` | 14 | Agent adapter previews, ingest execution blocks, source-trust stabilization, duplicate interaction, artifact views |
+| `test_indbase_agent_readonly_views.py` | 6 | v0.3.2.3b read-only artifact views, budgets, URI errors, show/list artifact boundaries, doctor read-only semantics |
 | `test_transition_bridge_smoke.py` | 1 | Real Node subprocess (opt-in env) |
 
 ### v0.2-specific automated proofs
@@ -138,6 +145,8 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v032_tag_governance_release_gate.py` | v0.3.2 | Fixture tagger: zero wrong auto-attaches; tag filter exact; candidates not filterable; scoped doctor hard = 0 |
 | `v0321_tag_harness_release_gate.py` | v0.3.2.1 | Isolated eval vault harness: hard gates zero; stable summary JSON; report-only precision/recall |
 | `v0322_tag_search_governance_release_gate.py` | v0.3.2.2 | Governed source search harness: AND filters, filter-only snippets, JSON contract, hard gates zero |
+| `v0323a_probe_stabilization_release_gate.py` | v0.3.2.3a | Deterministic consoler Source Trust probe: ingest -> search hit -> document artifact/view, environment checks |
+| `v0323b_consoler_readonly_views_release_gate.py` | v0.3.2.3b | Isolated read-only view gate: document/review/task/error/doctor artifact views, metadata, budgets, stable URI errors, doctor read-only |
 
 Shared helpers: `scripts/gate_common.py`.
 
@@ -170,7 +179,7 @@ uv run python scripts/v02_transition_smoke_gate.py
 ## What passing means (release bar)
 
 ```text
-322 collected / 320 passed (2 skipped by default markers)
+342 collected
 compileall clean
 v02 deterministic gate passed
 doctor negative gate passed
@@ -178,6 +187,8 @@ v031 taxonomy category gate passed (when touching taxonomy)
 v032 tag governance gate passed (when touching tag governance)
 v0321 tag harness gate passed (when touching tag harness)
 v0322 tag/search governance gate passed (when touching governed search)
+v0323a consoler probe stabilization gate passed (when touching indbase_agent)
+v0323b consoler read-only views gate passed (when touching indbase_agent)
 GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1/v0.3.2.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```

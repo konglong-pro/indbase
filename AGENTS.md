@@ -22,8 +22,14 @@ For detailed product and architecture planning, use:
 - `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md` for implementation rules specific to tag harness hardening
 - `docs/planning/v0.3.2.2-tag-search-governance.md` for the explicitly approved tag/search governance phase
 - `docs/agents/v0.3.2.2-tag-search-governance/AGENT.md` for implementation rules specific to tag/search governance
+- `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` for the explicitly approved consoler Source Trust Loop probe
+- `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md` for implementation rules specific to the consoler probe
+- `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` for the explicitly approved consoler probe stabilization phase
+- `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md` for implementation rules specific to probe stabilization
+- `docs/planning/v0.3.2.3b-consoler-read-only-views.md` for the explicitly approved consoler read-only views phase
+- `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md` for implementation rules specific to read-only views
 
-Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. Treat `docs/planning/v0.3.2.2-tag-search-governance.md` as canonical only for the active v0.3.2.2 tag/search governance phase. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
+Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. Treat `docs/planning/v0.3.2.2-tag-search-governance.md` as canonical only for the active v0.3.2.2 tag/search governance phase. Treat `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` as canonical only for the active consoler Source Trust Loop probe. Treat `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` as canonical only for probe stabilization before read-only view expansion. Treat `docs/planning/v0.3.2.3b-consoler-read-only-views.md` as canonical only for artifact-first read-only view expansion after probe stabilization. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
 
 Do not duplicate the full MVP specification in this file. Treat this file as the operational rulebook for agents, and treat the planning docs as the source of truth for product and architecture details.
 
@@ -47,7 +53,7 @@ Documentation rules:
 
 `indbase` is a local-first personal knowledge database. It ingests local materials into a vault, preserves originals, writes readable Markdown, records metadata and immutable revisions, chunks content, builds SQLite FTS indexes, and returns reliable search snippets tied to source chunks.
 
-The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, **v0.3.2.1 tag harness hardening**, and **v0.3.2.2 tag/search governance**.
+The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, **v0.3.2.1 tag harness hardening**, **v0.3.2.2 tag/search governance**, **v0.3.2.3 consoler Source Trust Loop probe**, **v0.3.2.3a consoler probe stabilization**, and **v0.3.2.3b consoler read-only views**.
 
 Do not implement other v0.2 or v0.3 functionality unless explicitly instructed in a task.
 
@@ -380,6 +386,67 @@ Rules:
 - `--json` is the stable machine contract for applied filters, source bindings, snippets, explanations, warnings, and filter errors.
 - Do not rewrite FTS scoring, chunking, indexing, vector/hybrid ranking, or `indb retrieve`.
 - Do not add production schema, providers, embeddings, UI, doctor repair, OR filters, similar-tag expansion, or semantic expansion unless explicitly requested.
+
+### Active v0.3.2.3 Consoler Source Trust Probe
+
+The user explicitly approved a consoler-backed dogfood probe after tag/search governance. For consoler adapter work:
+
+```text
+indbase_agent -> Source Trust Loop commands -> consoler variant probe
+```
+
+Rules:
+
+- Use `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` and `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md` before implementation.
+- `indbase_agent` may import `consoler_agent_sdk`; `indbase_core` must not.
+- The adapter must call `indbase_core` services directly, not shell out to `indb`.
+- The only first-version write command is `indbase.ingest_file`; review, task, error, search, and doc commands are read-only.
+- First-version search exposes trusted source snippets and v0.3.2.2 category/tag filter semantics only.
+- `doc_show` accepts `doc_id` only and returns bounded trusted metadata/source preview.
+- Do not add Web UI, full TUI, generated-output workflows, transition/translation UI, retrieval packages, `ask`, category/tag governance mutations, full source viewer, title/path lookup, or consoler protocol/runtime changes unless explicitly requested.
+
+### Active v0.3.2.3a Consoler Probe Stabilization
+
+The user explicitly approved probe stabilization before expanding search, review, doctor, or read-only artifact views. For stabilization work:
+
+```text
+successful ingest smoke -> searchable source hit -> document artifact/view
+-> clean consoler conformance signal -> environment stability
+```
+
+Rules:
+
+- Use `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` and `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md` before implementation.
+- Stabilize the existing Source Trust Loop; do not expand search syntax, review behavior, doctor repair, or artifact view scope.
+- Prove successful ingest-to-search with synthetic or sanitized fixture content.
+- Keep disabled swallow behavior visible as `legacy_conversion_retired`.
+- Search result document artifacts must remain bounded and include `metadata.vault_path`.
+- `doc_show` and artifact views remain read-only and bounded.
+- Ordinary `uv run` must work without a private consoler SDK index, and committed files must not contain local `E:/consoler` SDK paths.
+- Coordinate consoler conformance cleanup through `E:\consoler\docs\planning\v4c-indbase-probe-stabilization.md`; do not change consoler protocol/runtime schemas from indbase.
+- Do not add Web UI, full TUI, retrieval packages, `ask`, embeddings, generated answers, review/category/tag mutations, or doctor repair unless explicitly requested.
+
+### Active v0.3.2.3b Consoler Read-Only Views
+
+The user explicitly approved artifact-first read-only view expansion after probe stabilization. For consoler read-only view work:
+
+```text
+show/search/doctor artifact blocks -> current-state artifact views
+-> bounded operational inspection -> contract tests and release gate
+```
+
+Rules:
+
+- Use `docs/planning/v0.3.2.3b-consoler-read-only-views.md` and `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md` before implementation.
+- Implement read-only views in the `indbase_agent` projection layer; `indbase_core` must not import consoler SDK or artifact-view vocabulary.
+- First-version read-only view objects are document, review item, task, error, and doctor report.
+- Views are current-state, bounded, and must report `view_semantics`, `limits`, and `truncated`.
+- Artifact URIs must remain opaque `indbase://...` object identifiers, not local file paths, title/path lookup, globbing, SQL selectors, or vault browsers.
+- List commands must not emit row-level artifact blocks; focused show commands, `search_sources`, and `doctor` may emit bounded artifacts according to the phase plan.
+- Doctor report view is ephemeral and diagnostic only; do not add doctor run persistence or repair behavior.
+- Artifact view failures must use stable explicit errors instead of empty successful views.
+- Keep consoler protocol/runtime/schema and renderer changes out of indbase.
+- Do not add Web UI, full TUI, vault browser, full source viewer, revision browser, generated answers, retrieval packages, `ask`, embeddings, review/category/tag mutation, or output artifact gallery unless explicitly requested.
 
 ### v0.3 Intelligent Workflow MVP
 
@@ -756,6 +823,12 @@ If the task belongs to the approved v0.3.2 tag governance foundation, implement 
 If the task belongs to the approved v0.3.2.1 tag harness hardening phase, implement it according to `docs/planning/v0.3.2.1-tag-harness-hardening.md` and `docs/agents/v0.3.2.1-tag-harness-hardening/AGENT.md`.
 
 If the task belongs to the approved v0.3.2.2 tag/search governance phase, implement it according to `docs/planning/v0.3.2.2-tag-search-governance.md` and `docs/agents/v0.3.2.2-tag-search-governance/AGENT.md`.
+
+If the task belongs to the approved v0.3.2.3 consoler Source Trust Loop probe, implement it according to `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` and `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`.
+
+If the task belongs to the approved v0.3.2.3a consoler probe stabilization phase, implement it according to `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` and `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`.
+
+If the task belongs to the approved v0.3.2.3b consoler read-only views phase, implement it according to `docs/planning/v0.3.2.3b-consoler-read-only-views.md` and `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`.
 
 If the task belongs to any other v0.2 or v0.3 area and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep the current stable layer intact.
 

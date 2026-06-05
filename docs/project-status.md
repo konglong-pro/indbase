@@ -1,7 +1,7 @@
 # indbase Project Status
 
-**As of:** 2026-06-03
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, and v0.3.2.2 tag/search governance)
+**As of:** 2026-06-05
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, v0.3.2.2 tag/search governance, and v0.3.2.3/3a/3b consoler probe work)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -18,6 +18,9 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.3.2 tag governance foundation** | **Active expansion — implemented (core)**; migration `0011`, tag resolution/admission/budget/blocklist, deterministic tagger, candidate accept/reject + feedback/audit, relation-backed tag search filter, post-ingest tagging flags (`features.tag_governance`, `features.post_ingest_tagging`), doctor checks, fixture gate + CI job |
 | **v0.3.2.1 tag harness hardening** | **Active expansion — implemented (core)**; fixture schema + sanitized suite, isolated eval vault runner (`tag_harness_eval`), stable summary/failure JSON, hard gates, report-only precision/recall, release gate + CI job C2c |
 | **v0.3.2.2 tag/search governance** | **Active expansion — implemented (core)**; Search Filter Model, governed `indb search --category`/`--tag`/`--json`, filter-only representative snippets, match explanations, fixture harness + CI job C2d |
+| **v0.3.2.3 consoler Source Trust probe** | **Active expansion — implemented (adapter)**; `indbase_agent` command surface, manifest permissions, read-only source/review/task/error/doc views, bounded document artifacts |
+| **v0.3.2.3a consoler probe stabilization** | **Active expansion — implemented (local gate)**; deterministic ingest-to-search smoke, document artifact/view assertions, disabled-swallow visibility, environment path checks |
+| **v0.3.2.3b consoler read-only views** | **Active expansion — implemented (adapter + local gate)**; document/review/task/error/doctor artifact views, show/list artifact boundaries, bounded current-state view payloads, stable artifact URI errors |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -37,6 +40,9 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.3.2 tag governance spec | `docs/planning/v0.3.2-tag-governance-foundation.md` |
 | v0.3.2.1 tag harness spec | `docs/planning/v0.3.2.1-tag-harness-hardening.md` |
 | v0.3.2.2 tag/search governance spec | `docs/planning/v0.3.2.2-tag-search-governance.md` |
+| v0.3.2.3 consoler Source Trust probe spec | `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` |
+| v0.3.2.3a consoler probe stabilization spec | `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` |
+| v0.3.2.3b consoler read-only views spec | `docs/planning/v0.3.2.3b-consoler-read-only-views.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -244,13 +250,32 @@ policy_mutations_by_harness
 
 **Out of scope:** `ask`, retrieval ranking changes, providers/embeddings, production schema by default, parallel search commands, TUI, doctor repair, OR/semantic expansion.
 
+## v0.3.2.3 / 3a / 3b consoler Source Trust probe (implemented adapter + local gate)
+
+- **Specs:** `docs/planning/v0.3.2.3-consoler-source-trust-probe.md`, `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md`, `docs/planning/v0.3.2.3b-consoler-read-only-views.md`
+- **Agent guides:** `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`, `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`, `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`
+
+**Delivered in adapter/tests/scripts:**
+
+- `src/indbase_agent` exposes the first-version Source Trust Loop command surface for consoler.
+- Manifest commands include explicit `permissions`; `indbase.ingest_file` is the only write command.
+- `indbase.search_sources` delegates to governed v0.3.2.2 source/tag/category semantics and emits bounded `indbase.document` artifacts with `metadata.vault_path`.
+- `doc_show` and document artifact views are `doc_id`-only, read-only, and bounded.
+- `indbase.document`, `indbase.review_item`, `indbase.task`, `indbase.error`, and `indbase.doctor_report` artifact views report `view_semantics`, `limits`, and `truncated`.
+- show commands emit one focused artifact block; list commands emit none; `doctor` emits `indbase://doctor-reports/current`.
+- Artifact URI failures use stable explicit errors for invalid URI, unsupported kind, missing object, rejected scope, uninitialized vault, and view-generation failure.
+- Gate: `scripts/v0323a_probe_stabilization_release_gate.py` proves deterministic ingest -> revision/chunks/FTS -> search hit -> document artifact/view, plus ordinary `uv run` and local path pollution checks.
+- Gate: `scripts/v0323b_consoler_readonly_views_release_gate.py` proves read-only view contracts for document/review/task/error/doctor artifacts on an isolated synthetic vault.
+
+**Out of scope:** consoler protocol/runtime schema changes, Web UI, full TUI, retrieval packages, `ask`, embeddings, generated answers, review/category/tag mutations, doctor repair, full source viewer, revision browser, vault browser, title/path lookup.
+
 ## Release gates and CI (current)
 
 **Canonical gate doc:** `docs/planning/v0.2-release-gate-checkpoint.md`
 
 | Layer | What | PR blocker on GitHub |
 | --- | --- | --- |
-| A | `pytest` (322 collected) | Yes |
+| A | `pytest` (342 collected) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |
