@@ -484,6 +484,38 @@ _Avoid_: retrieve, ask, summary search, output artifact search
 The dogfood workflow that proves a local source can move from ingest through visible task/error/review state, trusted category/tag metadata, governed source search, source binding inspection, and doctor verification without confusing candidates, generated artifacts, or answers with trusted current source revisions.
 _Avoid_: full product UI, generated output loop, ask workflow, unbounded vault browser
 
+**Consoler Variant Dogfood UX**:
+The consoler-owned product experience layer that makes the existing indbase Source Trust Loop usable through a configured console variant without making natural-language drafting the primary path or adding indbase core capabilities, new mutations, generated answers, or vault browsing.
+_Avoid_: indbase core phase, Web UI, protocol expansion, full product UI, chat-first workflow
+
+**Indbase Variant Intent Drafting**:
+The consoler-owned deterministic form-prefill layer that maps one natural-language request inside the indbase console variant to one reviewable Source Trust Loop action. It does not send natural language to indbase, infer vault state, execute actions, add indbase commands, mutate indbase core, or become chat/LLM workflow.
+_Avoid_: indbase NL parser, direct execution, multi-action workflow, vault inference, ask
+
+**Single-Source Trust Walkthrough**:
+The first dogfood UX path through the consoler variant, focused on one vault and one source moving through health check, ingest or prepared fixture state, governed search, document artifact inspection, review/task/error inspection, and traceability.
+_Avoid_: all-command dashboard, multi-vault browser, generated answer workflow
+
+**Variant Vault Context**:
+A consoler variant convenience value that remembers the last successful vault path for form prefill without scanning disks, discovering vaults, managing vault lists, or becoming indbase business state.
+_Avoid_: vault manager, vault browser, auto-discovery, indbase configuration
+
+**Composed Variant Surface**:
+A dogfood UX approach that combines existing consoler home, form, timeline, result block, artifact view, history, and trace surfaces instead of introducing a separate wizard or variant-specific runtime state machine.
+_Avoid_: Source Trust wizard, parallel lifecycle, custom workflow engine
+
+**Artifact Open/Back Path**:
+The minimal artifact-view UX where a user can discover an artifact block, open it explicitly, inspect a bounded current-state view, and return to the originating timeline or trace without creating an artifact browser or persisted view cache.
+_Avoid_: artifact gallery, arbitrary URI fetch, stored artifact content
+
+**Deterministic Variant Dogfood Smoke**:
+A repeatable consoler variant validation that uses disposable synthetic indbase vault state and the real agent path to prove the product walkthrough without depending on private vaults, real swallow availability, or manual-only evidence.
+_Avoid_: private-vault gate, manual-only smoke, environment-specific success
+
+**Source Trust Loop Action Surface**:
+The ten-command consoler variant action set that exposes vault health, single-file ingest, governed source search, document inspection, review inspection, task inspection, and error inspection while keeping only ingest as a write action.
+_Avoid_: category/tag mutation surface, retrieval/ask surface, all-command admin console
+
 **Tag/Text Search**:
 A governed search path that combines a resolved **Tag Search Filter** with a full-text query over trusted current source chunks.
 _Avoid_: raw tag-string FTS match, candidate tag search, semantic retrieval

@@ -1,7 +1,7 @@
 # indbase Project Status
 
-**As of:** 2026-06-05
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, v0.3.2.2 tag/search governance, and v0.3.2.3/3a/3b consoler probe work)
+**As of:** 2026-06-06
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, v0.3.2.2 tag/search governance, v0.3.2.3/3a/3b consoler probe work, v0.3.2.3c consoler variant coordination, and v0.3.2.3d intent drafting coordination)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -21,6 +21,8 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.3.2.3 consoler Source Trust probe** | **Active expansion — implemented (adapter)**; `indbase_agent` command surface, manifest permissions, read-only source/review/task/error/doc views, bounded document artifacts |
 | **v0.3.2.3a consoler probe stabilization** | **Active expansion — implemented (local gate)**; deterministic ingest-to-search smoke, document artifact/view assertions, disabled-swallow visibility, environment path checks |
 | **v0.3.2.3b consoler read-only views** | **Active expansion — implemented (adapter + local gate)**; document/review/task/error/doctor artifact views, show/list artifact boundaries, bounded current-state view payloads, stable artifact URI errors |
+| **v0.3.2.3c consoler variant dogfood UX** | **Coordination closeout passed locally**; indbase-side planning/routing and manifest contract tests pass, while consoler v4d owns and validates the TUI variant implementation in `E:\consoler` |
+| **v0.3.2.3d indbase variant intent drafting** | **Coordination implemented**; indbase-side planning/routing and manifest/static contract tests keep intent drafting consoler-owned while consoler v4e owns deterministic TUI form prefill |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -43,6 +45,8 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.3.2.3 consoler Source Trust probe spec | `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` |
 | v0.3.2.3a consoler probe stabilization spec | `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` |
 | v0.3.2.3b consoler read-only views spec | `docs/planning/v0.3.2.3b-consoler-read-only-views.md` |
+| v0.3.2.3c consoler variant dogfood UX spec | `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md` |
+| v0.3.2.3d indbase variant intent drafting spec | `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -250,10 +254,10 @@ policy_mutations_by_harness
 
 **Out of scope:** `ask`, retrieval ranking changes, providers/embeddings, production schema by default, parallel search commands, TUI, doctor repair, OR/semantic expansion.
 
-## v0.3.2.3 / 3a / 3b consoler Source Trust probe (implemented adapter + local gate)
+## v0.3.2.3 / 3a / 3b / 3c / 3d consoler Source Trust probe and UX coordination
 
-- **Specs:** `docs/planning/v0.3.2.3-consoler-source-trust-probe.md`, `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md`, `docs/planning/v0.3.2.3b-consoler-read-only-views.md`
-- **Agent guides:** `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`, `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`, `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`
+- **Specs:** `docs/planning/v0.3.2.3-consoler-source-trust-probe.md`, `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md`, `docs/planning/v0.3.2.3b-consoler-read-only-views.md`, `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md`, `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`
+- **Agent guides:** `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`, `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`, `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`, `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`
 
 **Delivered in adapter/tests/scripts:**
 
@@ -266,6 +270,39 @@ policy_mutations_by_harness
 - Artifact URI failures use stable explicit errors for invalid URI, unsupported kind, missing object, rejected scope, uninitialized vault, and view-generation failure.
 - Gate: `scripts/v0323a_probe_stabilization_release_gate.py` proves deterministic ingest -> revision/chunks/FTS -> search hit -> document artifact/view, plus ordinary `uv run` and local path pollution checks.
 - Gate: `scripts/v0323b_consoler_readonly_views_release_gate.py` proves read-only view contracts for document/review/task/error/doctor artifacts on an isolated synthetic vault.
+- v0.3.2.3c indbase-side coordination keeps planning docs, agent routing, and the `tests/test_v0323c_indbase_coordination.py` manifest contract available while consoler owns the TUI variant implementation in `E:\consoler`.
+- v0.3.2.3c closeout is complete as of 2026-06-06: indbase adapter contracts, 3a/3b local gates, and consoler v4d TUI dogfood UX validation all passed locally.
+- v0.3.2.3d indbase-side coordination keeps planning docs, agent routing, and `tests/test_v0323d_indbase_intent_coordination.py` available while consoler owns deterministic intent drafting and TUI form prefill in `E:\consoler`.
+
+**v0.3.2.3c closeout evidence (2026-06-06):**
+
+```text
+E:\indbase
+uv run python -m pytest tests/test_indbase_agent.py tests/test_indbase_agent_readonly_views.py tests/test_v0323c_indbase_coordination.py -q
+  -> 22 passed
+uv run python scripts/v0323a_probe_stabilization_release_gate.py
+  -> status=passed; search_hits=1; successful_ingest_revisions=1; all hard findings clean
+uv run python scripts/v0323b_consoler_readonly_views_release_gate.py
+  -> status=passed; all hard findings clean
+uv run python -m compileall -q src tests scripts
+  -> passed
+
+E:\consoler
+pnpm --filter @consoler/tui test
+  -> 50 passed, 1 skipped
+pnpm test:v4d-indbase-dogfood-ux
+  -> V4d indbase dogfood UX gate passed
+pnpm --filter @consoler/runtime test
+  -> 74 passed
+pnpm typecheck
+  -> passed
+pnpm build
+  -> passed
+pnpm test:real-indbase-smoke
+  -> real indbase smoke passed
+```
+
+Boundary check: this closeout does not add indbase core features, new adapter commands, durable UX state, consoler protocol/runtime/schema changes, Web UI, vault browser, mutation UI, retrieval packages, `ask`, embeddings, or generated answers. Existing non-3c worktree changes in both repositories remain outside this closeout and were not reverted.
 
 **Out of scope:** consoler protocol/runtime schema changes, Web UI, full TUI, retrieval packages, `ask`, embeddings, generated answers, review/category/tag mutations, doctor repair, full source viewer, revision browser, vault browser, title/path lookup.
 
@@ -275,7 +312,7 @@ policy_mutations_by_harness
 
 | Layer | What | PR blocker on GitHub |
 | --- | --- | --- |
-| A | `pytest` (342 collected) | Yes |
+| A | `pytest` (344 collected) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |

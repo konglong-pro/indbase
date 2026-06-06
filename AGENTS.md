@@ -28,8 +28,12 @@ For detailed product and architecture planning, use:
 - `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md` for implementation rules specific to probe stabilization
 - `docs/planning/v0.3.2.3b-consoler-read-only-views.md` for the explicitly approved consoler read-only views phase
 - `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md` for implementation rules specific to read-only views
+- `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md` for the explicitly approved consoler variant dogfood UX phase
+- `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md` for implementation rules specific to dogfood UX coordination
+- `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md` for the explicitly approved indbase variant intent drafting coordination phase
+- `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md` for implementation rules specific to intent drafting coordination
 
-Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. Treat `docs/planning/v0.3.2.2-tag-search-governance.md` as canonical only for the active v0.3.2.2 tag/search governance phase. Treat `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` as canonical only for the active consoler Source Trust Loop probe. Treat `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` as canonical only for probe stabilization before read-only view expansion. Treat `docs/planning/v0.3.2.3b-consoler-read-only-views.md` as canonical only for artifact-first read-only view expansion after probe stabilization. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
+Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. Treat `docs/planning/v0.3.2.2-tag-search-governance.md` as canonical only for the active v0.3.2.2 tag/search governance phase. Treat `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` as canonical only for the active consoler Source Trust Loop probe. Treat `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` as canonical only for probe stabilization before read-only view expansion. Treat `docs/planning/v0.3.2.3b-consoler-read-only-views.md` as canonical only for artifact-first read-only view expansion after probe stabilization. Treat `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md` as canonical only for consoler-owned Source Trust Loop dogfood UX coordination. Treat `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md` as canonical only for consoler-owned deterministic intent drafting coordination. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
 
 Do not duplicate the full MVP specification in this file. Treat this file as the operational rulebook for agents, and treat the planning docs as the source of truth for product and architecture details.
 
@@ -53,7 +57,7 @@ Documentation rules:
 
 `indbase` is a local-first personal knowledge database. It ingests local materials into a vault, preserves originals, writes readable Markdown, records metadata and immutable revisions, chunks content, builds SQLite FTS indexes, and returns reliable search snippets tied to source chunks.
 
-The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, **v0.3.2.1 tag harness hardening**, **v0.3.2.2 tag/search governance**, **v0.3.2.3 consoler Source Trust Loop probe**, **v0.3.2.3a consoler probe stabilization**, and **v0.3.2.3b consoler read-only views**.
+The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, **v0.3.2.1 tag harness hardening**, **v0.3.2.2 tag/search governance**, **v0.3.2.3 consoler Source Trust Loop probe**, **v0.3.2.3a consoler probe stabilization**, **v0.3.2.3b consoler read-only views**, **v0.3.2.3c consoler variant dogfood UX**, and **v0.3.2.3d indbase variant intent drafting coordination**.
 
 Do not implement other v0.2 or v0.3 functionality unless explicitly instructed in a task.
 
@@ -448,6 +452,47 @@ Rules:
 - Keep consoler protocol/runtime/schema and renderer changes out of indbase.
 - Do not add Web UI, full TUI, vault browser, full source viewer, revision browser, generated answers, retrieval packages, `ask`, embeddings, review/category/tag mutation, or output artifact gallery unless explicitly requested.
 
+### Active v0.3.2.3c Consoler Variant Dogfood UX
+
+The user explicitly approved consoler-owned dogfood UX after read-only views. For 3c work:
+
+```text
+consoler indbase variant -> single-source trust walkthrough
+-> session-local vault context -> artifact open/back UX -> deterministic dogfood gate
+```
+
+Rules:
+
+- Use `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md`, `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md`, and `E:\consoler\docs\planning\v4d-indbase-dogfood-ux.md` before implementation.
+- Treat 3c as consoler-owned UX work; indbase should only provide docs, stable adapter contracts, and narrow adapter bug fixes if a focused consoler test proves a defect.
+- Do not add new indbase commands, `indbase_core` features, migrations, durable UX state, or vault preference storage.
+- The consoler variant action surface is the ten-command Source Trust Loop: doctor, ingest_file, search_sources, doc_show, review list/show, task list/show, and error list/show.
+- `vault_path` memory is session-local TUI form prefill only; do not scan disks, infer from cwd/history, persist preferences, or build a vault manager.
+- Use existing consoler home, form, timeline, result block, artifact view, history, and trace surfaces; do not add a Source Trust wizard or parallel lifecycle.
+- NL/intent drafting is not part of 3c completion; leave deterministic or assisted NL for a later explicit phase.
+- Keep consoler protocol/runtime/store/schema, Web UI, vault browser, review/category/tag mutations, doctor repair, retrieval packages, `ask`, embeddings, generated answers, and LLM-assisted UX out of scope unless explicitly requested.
+
+### Active v0.3.2.3d Indbase Variant Intent Drafting
+
+The user explicitly approved deterministic indbase variant intent drafting coordination after the 3c/V4d closeout. For 3d work:
+
+```text
+single-shot NL input -> deterministic variant-scoped action draft
+-> editable Source Trust Loop form -> normal consoler lifecycle
+```
+
+Rules:
+
+- Use `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`, and `E:\consoler\docs\planning\v4e-indbase-variant-intent-drafting.md` before implementation.
+- Treat 3d as consoler-owned deterministic form-prefill UX; indbase should provide docs, stable adapter contracts, and narrow adapter bug fixes only if a focused consoler test proves a defect.
+- Do not add indbase commands, indbase natural-language parsing, `indbase_core` changes, migrations, durable UX state, or vault preference storage.
+- Intent drafting must stay within the ten-command Source Trust Loop action surface from 3c.
+- Runtime intent mapping must not infer `vault_path` from session state, cwd, history, filesystems, vault scans, trace, artifact state, or previous results.
+- TUI may merge session-local `vault_path` only at the editable form layer; this is not mapper inference.
+- Search filters may be prefilled only from explicit low-ambiguity syntax such as `tag:<ref>` or `category:<ref>`; do not infer governed filters from vague semantics.
+- Object IDs must not be inferred from history, trace, artifact state, or "latest result".
+- Default assisted/LLM intent, chat, multi-action workflows, provider setup, model calls, Web UI, vault browser, review/category/tag mutations, doctor repair, retrieval packages, `ask`, embeddings, generated answers, and consoler protocol/runtime/store/schema changes are out of scope unless explicitly requested.
+
 ### v0.3 Intelligent Workflow MVP
 
 Planned additions only. Do not implement during v0.1 unless explicitly requested:
@@ -829,6 +874,10 @@ If the task belongs to the approved v0.3.2.3 consoler Source Trust Loop probe, i
 If the task belongs to the approved v0.3.2.3a consoler probe stabilization phase, implement it according to `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` and `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`.
 
 If the task belongs to the approved v0.3.2.3b consoler read-only views phase, implement it according to `docs/planning/v0.3.2.3b-consoler-read-only-views.md` and `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`.
+
+If the task belongs to the approved v0.3.2.3c consoler variant dogfood UX phase, implement it according to `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md`, `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md`, and `E:\consoler\docs\planning\v4d-indbase-dogfood-ux.md`.
+
+If the task belongs to the approved v0.3.2.3d indbase variant intent drafting phase, implement it according to `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`, and `E:\consoler\docs\planning\v4e-indbase-variant-intent-drafting.md`.
 
 If the task belongs to any other v0.2 or v0.3 area and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep the current stable layer intact.
 

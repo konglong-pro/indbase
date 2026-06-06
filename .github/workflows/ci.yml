@@ -173,6 +173,30 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
 
+  consoler-coordination-v0323:
+    name: C2e — v0.3.2.3 consoler coordination gates
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: v0.3.2.3c/3d consoler coordination contract tests
+        run: uv run python -m pytest tests/test_v0323c_indbase_coordination.py tests/test_v0323d_indbase_intent_coordination.py -q
+        env:
+          PYTHONIOENCODING: utf-8
+
   retrieval-v032:
     name: C3 — v0.3.2 retrieval release gate
     runs-on: ubuntu-latest
