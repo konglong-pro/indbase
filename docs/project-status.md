@@ -22,7 +22,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.3.2.3a consoler probe stabilization** | **Active expansion — implemented (local gate)**; deterministic ingest-to-search smoke, document artifact/view assertions, disabled-swallow visibility, environment path checks |
 | **v0.3.2.3b consoler read-only views** | **Active expansion — implemented (adapter + local gate)**; document/review/task/error/doctor artifact views, show/list artifact boundaries, bounded current-state view payloads, stable artifact URI errors |
 | **v0.3.2.3c consoler variant dogfood UX** | **Coordination closeout passed locally**; indbase-side planning/routing and manifest contract tests pass, while consoler v4d owns and validates the TUI variant implementation in `E:\consoler` |
-| **v0.3.2.3d indbase variant intent drafting** | **Coordination implemented**; indbase-side planning/routing and manifest/static contract tests keep intent drafting consoler-owned while consoler v4e owns deterministic TUI form prefill |
+| **v0.3.2.3d indbase variant intent drafting** | **Coordination closeout passed**; indbase-side planning/routing and manifest/static contract tests keep intent drafting consoler-owned while consoler v4e owns deterministic TUI form prefill |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -273,6 +273,7 @@ policy_mutations_by_harness
 - v0.3.2.3c indbase-side coordination keeps planning docs, agent routing, and the `tests/test_v0323c_indbase_coordination.py` manifest contract available while consoler owns the TUI variant implementation in `E:\consoler`.
 - v0.3.2.3c closeout is complete as of 2026-06-06: indbase adapter contracts, 3a/3b local gates, and consoler v4d TUI dogfood UX validation all passed locally.
 - v0.3.2.3d indbase-side coordination keeps planning docs, agent routing, and `tests/test_v0323d_indbase_intent_coordination.py` available while consoler owns deterministic intent drafting and TUI form prefill in `E:\consoler`.
+- v0.3.2.3d closeout is complete as of 2026-06-06: indbase PR #1 and consoler PR #4 are green, with consoler PR #4 kept as a stacked PR on `feat/v1k-v1l-on-main`.
 
 **v0.3.2.3c closeout evidence (2026-06-06):**
 
@@ -306,13 +307,51 @@ Boundary check: this closeout does not add indbase core features, new adapter co
 
 **Out of scope:** consoler protocol/runtime schema changes, Web UI, full TUI, retrieval packages, `ask`, embeddings, generated answers, review/category/tag mutations, doctor repair, full source viewer, revision browser, vault browser, title/path lookup.
 
+**v0.3.2.3d closeout evidence (2026-06-06):**
+
+```text
+E:\indbase
+uv run python -m pytest
+  -> 345 passed, 2 skipped
+uv run python -m pytest tests/test_v0323c_indbase_coordination.py tests/test_v0323d_indbase_intent_coordination.py -q
+  -> 5 passed
+uv run python -m compileall -q src tests scripts
+  -> passed
+
+E:\consoler
+pnpm test:v4e-indbase-variant-intent-drafting
+  -> V4e indbase variant intent drafting gate passed
+pnpm test:v4d-indbase-dogfood-ux
+  -> V4d indbase dogfood UX gate passed
+pnpm test:v2-release-gate
+  -> V2 release gate passed
+pnpm test:v3c-assisted-intent-gate
+  -> V3c assisted intent gate passed
+pnpm test:v3c-tui-assisted-intent-gate
+  -> V3c TUI assisted intent gate passed
+pnpm test:python-sdk-package
+  -> Python SDK package gate passed
+CONSOLER_KEEP_REAL_INDBASE_SMOKE=1 pnpm test:real-indbase-smoke
+  -> real indbase smoke passed
+pnpm exec vitest run packages/tui/test/real-indbase-product-tui-smoke.test.tsx
+  -> 1 test passed
+
+GitHub
+indbase PR #1
+  -> all visible checks passed
+consoler PR #4
+  -> all visible checks passed
+```
+
+Boundary check: this closeout confirms deterministic, single-shot, variant-scoped intent drafting and editable form prefill only. It does not add chat, `ask`, Web UI, vault browsing, source browsing, durable UX state, review/category/tag mutation, retrieval packages, embeddings, generated answers, default LLM behavior, indbase core features, or consoler protocol/runtime store changes.
+
 ## Release gates and CI (current)
 
 **Canonical gate doc:** `docs/planning/v0.2-release-gate-checkpoint.md`
 
 | Layer | What | PR blocker on GitHub |
 | --- | --- | --- |
-| A | `pytest` (344 collected) | Yes |
+| A | `pytest` (345 collected) | Yes |
 | B | `compileall` | Yes |
 | C | `v02_deterministic_release_gate.py` + `doctor_negative_gate.py` | Yes |
 | D | Real swallow + real Node transition smoke | Yes (with deps installed in CI) |

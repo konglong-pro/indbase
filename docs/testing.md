@@ -217,6 +217,50 @@ pnpm test:real-indbase-smoke
 
 Scope boundary: this closeout records the already-passing indbase adapter contracts and consoler-owned v4d TUI dogfood UX checks. It does not expand indbase commands, consoler protocol/runtime semantics, vault browsing, Web UI, mutation UI, retrieval packages, `ask`, embeddings, generated answers, or NL/intent drafting.
 
+## Latest v0.3.2.3d / consoler v4e closeout
+
+Latest local and GitHub closeout evidence recorded on 2026-06-06:
+
+```text
+E:\indbase
+uv run python -m pytest
+  -> 345 passed, 2 skipped
+uv run python -m pytest tests/test_v0323c_indbase_coordination.py tests/test_v0323d_indbase_intent_coordination.py -q
+  -> 5 passed
+uv run python -m compileall -q src tests scripts
+  -> passed
+git diff --check
+  -> passed with LF/CRLF warnings only
+
+E:\consoler
+pnpm test:v4e-indbase-variant-intent-drafting
+  -> V4e indbase variant intent drafting gate passed
+pnpm test:v4d-indbase-dogfood-ux
+  -> V4d indbase dogfood UX gate passed
+pnpm test:v2-release-gate
+  -> V2 release gate passed
+pnpm test:v3c-assisted-intent-gate
+  -> V3c assisted intent gate passed
+pnpm test:v3c-tui-assisted-intent-gate
+  -> V3c TUI assisted intent gate passed
+pnpm test:python-sdk-package
+  -> Python SDK package gate passed
+CONSOLER_KEEP_REAL_INDBASE_SMOKE=1 pnpm test:real-indbase-smoke
+  -> real indbase smoke passed
+pnpm exec vitest run packages/tui/test/real-indbase-product-tui-smoke.test.tsx
+  -> 1 test passed
+git diff --check
+  -> passed with LF/CRLF warnings only
+
+GitHub
+indbase PR #1
+  -> all visible checks passed; base main
+consoler PR #4
+  -> all visible checks passed; stacked on feat/v1k-v1l-on-main
+```
+
+Scope boundary: v0.3.2.3d closes deterministic, single-shot, variant-scoped intent drafting and editable form prefill. It does not add chat, `ask`, Web UI, vault browsing, source browsing, durable UX state, review/category/tag mutation, retrieval packages, embeddings, generated answers, default LLM behavior, indbase core features, or consoler protocol/runtime store changes.
+
 ## What passing means (release bar)
 
 ```text
