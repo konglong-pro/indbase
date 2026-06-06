@@ -1,7 +1,7 @@
 # indbase Project Status
 
 **As of:** 2026-06-06
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, v0.3.2.2 tag/search governance, v0.3.2.3/3a/3b consoler probe work, v0.3.2.3c consoler variant coordination, and v0.3.2.3d intent drafting coordination)
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, v0.3.2.2 tag/search governance, v0.3.2.3/3a/3b consoler probe work, v0.3.2.3c consoler variant coordination, v0.3.2.3d intent drafting coordination, and v0.3.2.3e real dogfood friction pass coordination)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -23,6 +23,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.3.2.3b consoler read-only views** | **Active expansion — implemented (adapter + local gate)**; document/review/task/error/doctor artifact views, show/list artifact boundaries, bounded current-state view payloads, stable artifact URI errors |
 | **v0.3.2.3c consoler variant dogfood UX** | **Coordination closeout passed locally**; indbase-side planning/routing and manifest contract tests pass, while consoler v4d owns and validates the TUI variant implementation in `E:\consoler` |
 | **v0.3.2.3d indbase variant intent drafting** | **Coordination closeout passed**; indbase-side planning/routing and manifest/static contract tests keep intent drafting consoler-owned while consoler v4e owns deterministic TUI form prefill |
+| **v0.3.2.3e Source Trust real dogfood friction pass** | **Coordination closeout passed**; indbase-side planning/routing records the evidence-first friction boundary, while consoler v4f owns terminal-stable TUI copy, real product smoke coverage, and the V4f friction register |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -47,6 +48,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.3.2.3b consoler read-only views spec | `docs/planning/v0.3.2.3b-consoler-read-only-views.md` |
 | v0.3.2.3c consoler variant dogfood UX spec | `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md` |
 | v0.3.2.3d indbase variant intent drafting spec | `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md` |
+| v0.3.2.3e Source Trust real dogfood friction pass spec | `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -254,10 +256,10 @@ policy_mutations_by_harness
 
 **Out of scope:** `ask`, retrieval ranking changes, providers/embeddings, production schema by default, parallel search commands, TUI, doctor repair, OR/semantic expansion.
 
-## v0.3.2.3 / 3a / 3b / 3c / 3d consoler Source Trust probe and UX coordination
+## v0.3.2.3 / 3a / 3b / 3c / 3d / 3e consoler Source Trust probe and UX coordination
 
-- **Specs:** `docs/planning/v0.3.2.3-consoler-source-trust-probe.md`, `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md`, `docs/planning/v0.3.2.3b-consoler-read-only-views.md`, `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md`, `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`
-- **Agent guides:** `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`, `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`, `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`, `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`
+- **Specs:** `docs/planning/v0.3.2.3-consoler-source-trust-probe.md`, `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md`, `docs/planning/v0.3.2.3b-consoler-read-only-views.md`, `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md`, `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`, `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md`
+- **Agent guides:** `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`, `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`, `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`, `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`, `docs/agents/v0.3.2.3e-source-trust-real-dogfood-friction-pass/AGENT.md`
 
 **Delivered in adapter/tests/scripts:**
 
@@ -274,6 +276,8 @@ policy_mutations_by_harness
 - v0.3.2.3c closeout is complete as of 2026-06-06: indbase adapter contracts, 3a/3b local gates, and consoler v4d TUI dogfood UX validation all passed locally.
 - v0.3.2.3d indbase-side coordination keeps planning docs, agent routing, and `tests/test_v0323d_indbase_intent_coordination.py` available while consoler owns deterministic intent drafting and TUI form prefill in `E:\consoler`.
 - v0.3.2.3d closeout is complete as of 2026-06-06: indbase PR #1 and consoler PR #4 are green, with consoler PR #4 kept as a stacked PR on `feat/v1k-v1l-on-main`.
+- v0.3.2.3e indbase-side coordination keeps planning docs and agent routing for the evidence-first real dogfood friction pass while consoler owns V4f TUI friction fixes, the V4f gate, real product TUI smoke coverage, and the friction register.
+- v0.3.2.3e closeout is complete as of 2026-06-06: consoler V4f deterministic gate, V4d/V4e regression gates, typecheck/build, real indbase smoke, and local-only real product TUI smoke all passed. No indbase adapter or core code changed.
 
 **v0.3.2.3c closeout evidence (2026-06-06):**
 
@@ -344,6 +348,34 @@ consoler PR #4
 ```
 
 Boundary check: this closeout confirms deterministic, single-shot, variant-scoped intent drafting and editable form prefill only. It does not add chat, `ask`, Web UI, vault browsing, source browsing, durable UX state, review/category/tag mutation, retrieval packages, embeddings, generated answers, default LLM behavior, indbase core features, or consoler protocol/runtime store changes.
+
+**v0.3.2.3e closeout evidence (2026-06-06):**
+
+```text
+E:\consoler
+pnpm --filter @consoler/tui test
+  -> 14 test files passed, 1 skipped; 54 tests passed, 1 skipped
+pnpm test:v4f-indbase-real-dogfood-friction-pass
+  -> V4f indbase real dogfood friction pass gate passed
+pnpm test:v4e-indbase-variant-intent-drafting
+  -> V4e indbase variant intent drafting gate passed
+pnpm test:v4d-indbase-dogfood-ux
+  -> V4d indbase dogfood UX gate passed
+pnpm typecheck
+  -> passed
+pnpm build
+  -> passed
+CONSOLER_KEEP_REAL_INDBASE_SMOKE=1 pnpm test:real-indbase-smoke
+  -> real indbase smoke passed
+pnpm exec vitest run packages/tui/test/real-indbase-product-tui-smoke.test.tsx
+  -> 1 test passed
+```
+
+Manual `pnpm tui:indbase --` was not run in this Codex shell because there is no reliable interactive PTY. The automated Ink smoke was recorded separately and was not treated as a manually typed TUI session.
+
+Friction summary: V4f fixed terminal-stable control copy, added real product smoke coverage for deterministic NL search form prefill with a real discovered manifest, and added a V4f gate/friction register. Same-session continuation from a real finished doctor result to home is deferred until manual PTY confirmation.
+
+Boundary check: this closeout remains a friction pass. It does not add new Source Trust Loop commands, indbase adapter commands, indbase core features, migrations, durable UX state, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default LLM behavior, broader NL capability, or consoler protocol/runtime/store/schema changes.
 
 ## Release gates and CI (current)
 

@@ -40,6 +40,10 @@ uv run python -m pytest tests/test_v0323c_indbase_coordination.py -q
 # v0.3.2.3d indbase variant intent drafting coordination (when coordinating consoler v4e)
 uv run python -m pytest tests/test_v0323d_indbase_intent_coordination.py -q
 
+# v0.3.2.3e Source Trust real dogfood friction pass coordination
+# Docs/status coordination only unless indbase_agent code changes.
+# Consoler owns the V4f gate: pnpm test:v4f-indbase-real-dogfood-friction-pass
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -261,6 +265,41 @@ consoler PR #4
 
 Scope boundary: v0.3.2.3d closes deterministic, single-shot, variant-scoped intent drafting and editable form prefill. It does not add chat, `ask`, Web UI, vault browsing, source browsing, durable UX state, review/category/tag mutation, retrieval packages, embeddings, generated answers, default LLM behavior, indbase core features, or consoler protocol/runtime store changes.
 
+## Latest v0.3.2.3e / consoler v4f closeout
+
+Latest local closeout evidence recorded on 2026-06-06:
+
+```text
+E:\consoler
+pnpm --filter @consoler/tui test
+  -> 14 test files passed, 1 skipped; 54 tests passed, 1 skipped
+pnpm test:v4f-indbase-real-dogfood-friction-pass
+  -> V4f indbase real dogfood friction pass gate passed
+pnpm test:v4e-indbase-variant-intent-drafting
+  -> V4e indbase variant intent drafting gate passed
+pnpm test:v4d-indbase-dogfood-ux
+  -> V4d indbase dogfood UX gate passed
+pnpm typecheck
+  -> passed
+pnpm build
+  -> passed
+CONSOLER_KEEP_REAL_INDBASE_SMOKE=1 pnpm test:real-indbase-smoke
+  -> real indbase smoke passed
+pnpm exec vitest run packages/tui/test/real-indbase-product-tui-smoke.test.tsx
+  -> 1 test passed
+```
+
+Friction coverage:
+
+- fixed terminal-stable control copy for touched TUI navigation/artifact/form surfaces
+- added V4f deterministic gate and friction register
+- strengthened local-only real product TUI smoke so deterministic NL opens an editable search form with an explicit disposable vault path under the real discovered indbase manifest
+- deferred same-session continuation from a real finished doctor result to home until manual PTY confirmation
+
+Manual `pnpm tui:indbase --` was not run in this Codex shell because there is no reliable interactive PTY. The automated Ink smoke was recorded separately and was not treated as a manually typed TUI session.
+
+Scope boundary: v0.3.2.3e is a consoler-owned friction pass. It did not add indbase adapter commands, indbase core features, migrations, durable UX state, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default LLM behavior, broader NL capability, or consoler protocol/runtime/store/schema changes.
+
 ## What passing means (release bar)
 
 ```text
@@ -276,6 +315,7 @@ v0323a consoler probe stabilization gate passed (when touching indbase_agent)
 v0323b consoler read-only views gate passed (when touching indbase_agent)
 v0323c indbase coordination contract passed (when coordinating consoler v4d)
 v0323d indbase intent coordination contract passed (when coordinating consoler v4e)
+v0323e consoler V4f friction gate passed in E:\consoler (when coordinating consoler v4f)
 GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1/v0.3.2.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```

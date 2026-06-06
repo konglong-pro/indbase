@@ -492,6 +492,10 @@ _Avoid_: indbase core phase, Web UI, protocol expansion, full product UI, chat-f
 The consoler-owned deterministic form-prefill layer that maps one natural-language request inside the indbase console variant to one reviewable Source Trust Loop action. It does not send natural language to indbase, infer vault state, execute actions, add indbase commands, mutate indbase core, or become chat/LLM workflow.
 _Avoid_: indbase NL parser, direct execution, multi-action workflow, vault inference, ask
 
+**Source Trust Real Dogfood Friction Pass**:
+An evidence-first closeout phase for the indbase console variant where real local Source Trust Loop use identifies and fixes concrete TUI friction in the existing surface. It may refine consoler-owned variant UX, tests, and docs, and may make narrow indbase adapter fixes only when real dogfood proves a contract defect.
+_Avoid_: new feature phase, protocol/runtime/store/schema change, Web UI, vault browser, generated answer, review/category/tag mutation, Source Trust Loop expansion
+
 **Single-Source Trust Walkthrough**:
 The first dogfood UX path through the consoler variant, focused on one vault and one source moving through health check, ingest or prepared fixture state, governed search, document artifact inspection, review/task/error inspection, and traceability.
 _Avoid_: all-command dashboard, multi-vault browser, generated answer workflow
