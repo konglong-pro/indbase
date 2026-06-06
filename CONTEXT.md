@@ -492,6 +492,10 @@ _Avoid_: indbase core phase, Web UI, protocol expansion, full product UI, chat-f
 The consoler-owned deterministic form-prefill layer that maps one natural-language request inside the indbase console variant to one reviewable Source Trust Loop action. It does not send natural language to indbase, infer vault state, execute actions, add indbase commands, mutate indbase core, or become chat/LLM workflow.
 _Avoid_: indbase NL parser, direct execution, multi-action workflow, vault inference, ask
 
+**Indbase NL v2 Intent Drafting**:
+The next indbase console variant drafting phase that may use opt-in assisted intent only after deterministic drafting is insufficient, while still producing at most one editable Source Trust Loop action form. It may receive the user's current text, the scoped indbase action surface, and schema hints, but not session vault context, history, trace, artifact metadata, vault content, source snippets, or filesystem reads.
+_Avoid_: chat, ask, direct execution, multi-action workflow, latest-result inference, vault-content provider context
+
 **Source Trust Real Dogfood Friction Pass**:
 An evidence-first closeout phase for the indbase console variant where real local Source Trust Loop use identifies and fixes concrete TUI friction in the existing surface. It may refine consoler-owned variant UX, tests, and docs, and may make narrow indbase adapter fixes only when real dogfood proves a contract defect.
 _Avoid_: new feature phase, protocol/runtime/store/schema change, Web UI, vault browser, generated answer, review/category/tag mutation, Source Trust Loop expansion

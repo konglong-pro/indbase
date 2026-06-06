@@ -1,7 +1,7 @@
 # indbase Project Status
 
 **As of:** 2026-06-06
-**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, v0.3.2.2 tag/search governance, v0.3.2.3/3a/3b consoler probe work, v0.3.2.3c consoler variant coordination, v0.3.2.3d intent drafting coordination, and v0.3.2.3e real dogfood friction pass coordination)
+**Package version:** `0.1.0` (PyPI-style; product phases span v0.1 freeze, active v0.2 expansions, v0.3.1 category foundation, v0.3.2 tag governance, v0.3.2.1 tag harness hardening, v0.3.2.2 tag/search governance, v0.3.2.3/3a/3b consoler probe work, v0.3.2.3c consoler variant coordination, v0.3.2.3d intent drafting coordination, v0.3.2.3e real dogfood friction pass coordination, and v0.3.2.3f NL v2 intent drafting coordination)
 
 This document is the **single canonical summary of work completed to date**. It replaces reading many scattered checkpoint files for “what exists now.” Detailed specs and historical milestone evidence remain under `docs/planning/` and `docs/agents/`.
 
@@ -24,6 +24,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | **v0.3.2.3c consoler variant dogfood UX** | **Coordination closeout passed locally**; indbase-side planning/routing and manifest contract tests pass, while consoler v4d owns and validates the TUI variant implementation in `E:\consoler` |
 | **v0.3.2.3d indbase variant intent drafting** | **Coordination closeout passed**; indbase-side planning/routing and manifest/static contract tests keep intent drafting consoler-owned while consoler v4e owns deterministic TUI form prefill |
 | **v0.3.2.3e Source Trust real dogfood friction pass** | **Coordination closeout passed**; indbase-side planning/routing records the evidence-first friction boundary, while consoler v4f owns terminal-stable TUI copy, real product smoke coverage, and the V4f friction register |
+| **v0.3.2.3f indbase NL v2 intent drafting** | **Coordination closeout passed locally**; indbase-side docs/routing and coordination tests keep opt-in assisted intent drafting consoler-owned while consoler v4g owns fake-provider validation, TUI notices, and the V4g gate |
 | **v0.3 intelligent workflow** | Not started (`indb ask`, accepted atomic notes at scale, etc.) |
 
 **Trust model (non-negotiable):** External tools (swallow, transition) may convert or render, but **indbase** owns identity, revisions, promotion, chunks, indexes, artifacts, tasks, errors, and doctor. Candidates and export artifacts are not interchangeable with trusted source revisions.
@@ -49,6 +50,7 @@ This document is the **single canonical summary of work completed to date**. It 
 | v0.3.2.3c consoler variant dogfood UX spec | `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md` |
 | v0.3.2.3d indbase variant intent drafting spec | `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md` |
 | v0.3.2.3e Source Trust real dogfood friction pass spec | `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md` |
+| v0.3.2.3f indbase NL v2 intent drafting spec | `docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md` |
 | Agent implementation rules | `AGENTS.md`, `docs/agents/*/AGENT.md` |
 | Historical milestone checkpoints | `docs/planning/archive/` (evidence archives, not “current status”) |
 
@@ -256,10 +258,10 @@ policy_mutations_by_harness
 
 **Out of scope:** `ask`, retrieval ranking changes, providers/embeddings, production schema by default, parallel search commands, TUI, doctor repair, OR/semantic expansion.
 
-## v0.3.2.3 / 3a / 3b / 3c / 3d / 3e consoler Source Trust probe and UX coordination
+## v0.3.2.3 / 3a / 3b / 3c / 3d / 3e / 3f consoler Source Trust probe and UX coordination
 
-- **Specs:** `docs/planning/v0.3.2.3-consoler-source-trust-probe.md`, `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md`, `docs/planning/v0.3.2.3b-consoler-read-only-views.md`, `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md`, `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`, `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md`
-- **Agent guides:** `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`, `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`, `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`, `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`, `docs/agents/v0.3.2.3e-source-trust-real-dogfood-friction-pass/AGENT.md`
+- **Specs:** `docs/planning/v0.3.2.3-consoler-source-trust-probe.md`, `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md`, `docs/planning/v0.3.2.3b-consoler-read-only-views.md`, `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md`, `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`, `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md`, `docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md`
+- **Agent guides:** `docs/agents/v0.3.2.3-consoler-source-trust-probe/AGENT.md`, `docs/agents/v0.3.2.3a-consoler-probe-stabilization/AGENT.md`, `docs/agents/v0.3.2.3b-consoler-read-only-views/AGENT.md`, `docs/agents/v0.3.2.3c-consoler-variant-dogfood-ux/AGENT.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`, `docs/agents/v0.3.2.3e-source-trust-real-dogfood-friction-pass/AGENT.md`, `docs/agents/v0.3.2.3f-indbase-nl-v2-intent-drafting/AGENT.md`
 
 **Delivered in adapter/tests/scripts:**
 
@@ -278,6 +280,8 @@ policy_mutations_by_harness
 - v0.3.2.3d closeout is complete as of 2026-06-06: indbase PR #1 and consoler PR #4 are green, with consoler PR #4 kept as a stacked PR on `feat/v1k-v1l-on-main`.
 - v0.3.2.3e indbase-side coordination keeps planning docs and agent routing for the evidence-first real dogfood friction pass while consoler owns V4f TUI friction fixes, the V4f gate, real product TUI smoke coverage, and the friction register.
 - v0.3.2.3e closeout is complete as of 2026-06-06: consoler V4f deterministic gate, V4d/V4e regression gates, typecheck/build, real indbase smoke, and local-only real product TUI smoke all passed. No indbase adapter or core code changed.
+- v0.3.2.3f indbase-side coordination keeps planning docs, agent routing, and `tests/test_v0323f_indbase_nl_v2_coordination.py` available while consoler owns opt-in assisted NL v2 intent drafting in `E:\consoler`.
+- v0.3.2.3f closeout is complete locally as of 2026-06-06: consoler V4g fake-provider gate, V3c/V4e/V4f regression gates, typecheck, and indbase coordination tests passed. No indbase adapter or core code changed.
 
 **v0.3.2.3c closeout evidence (2026-06-06):**
 
@@ -376,6 +380,42 @@ Manual `pnpm tui:indbase --` was not run in this Codex shell because there is no
 Friction summary: V4f fixed terminal-stable control copy, added real product smoke coverage for deterministic NL search form prefill with a real discovered manifest, and added a V4f gate/friction register. Same-session continuation from a real finished doctor result to home is deferred until manual PTY confirmation.
 
 Boundary check: this closeout remains a friction pass. It does not add new Source Trust Loop commands, indbase adapter commands, indbase core features, migrations, durable UX state, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default LLM behavior, broader NL capability, or consoler protocol/runtime/store/schema changes.
+
+**v0.3.2.3f closeout evidence (2026-06-06):**
+
+```text
+E:\indbase
+uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
+  -> 3 passed
+uv run python -m compileall -q src tests scripts
+  -> passed
+uv run python -m pytest --collect-only -q
+  -> 348 collected
+
+E:\consoler
+pnpm --filter @consoler/runtime test
+  -> 14 test files passed; 85 tests passed
+pnpm --filter @consoler/agentctl test
+  -> 8 test files passed; 30 tests passed
+pnpm --filter @consoler/tui test
+  -> 14 test files passed, 1 skipped; 56 tests passed, 1 skipped
+pnpm test:v4g-indbase-nl-v2-intent-drafting
+  -> V4g indbase NL v2 intent drafting gate passed; includes pnpm build
+pnpm test:v3c-assisted-intent-gate
+  -> V3c assisted intent gate passed
+pnpm test:v3c-tui-assisted-intent-gate
+  -> V3c TUI assisted intent gate passed
+pnpm test:v4e-indbase-variant-intent-drafting
+  -> V4e indbase variant intent drafting gate passed
+pnpm test:v4f-indbase-real-dogfood-friction-pass
+  -> V4f indbase real dogfood friction pass gate passed
+pnpm typecheck
+  -> passed
+```
+
+Real-provider smoke and manual `pnpm tui:indbase --` were not run in this Codex shell. They remain local-only evidence and are not default release gates.
+
+Boundary check: this closeout confirms opt-in assisted Intent Drafting for one editable Source Trust Loop form. It does not add new Source Trust Loop commands, indbase adapter commands, indbase core features, migrations, durable UX state, raw NL parsing in indbase, provider setup or persistence, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default assisted behavior, follow-up suggestions, multi-action workflows, or consoler protocol/runtime/store/schema changes from indbase.
 
 ## Release gates and CI (current)
 

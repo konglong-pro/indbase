@@ -23,6 +23,8 @@ Active **product specifications** and **release gate** definitions for indbase.
 | v0.3.2.3b consoler read-only views | [v0.3.2.3b-consoler-read-only-views.md](v0.3.2.3b-consoler-read-only-views.md) |
 | v0.3.2.3c consoler variant dogfood UX | [v0.3.2.3c-consoler-variant-dogfood-ux.md](v0.3.2.3c-consoler-variant-dogfood-ux.md) |
 | v0.3.2.3d indbase variant intent drafting | [v0.3.2.3d-indbase-variant-intent-drafting.md](v0.3.2.3d-indbase-variant-intent-drafting.md) |
+| v0.3.2.3e Source Trust real dogfood friction pass | [v0.3.2.3e-source-trust-real-dogfood-friction-pass.md](v0.3.2.3e-source-trust-real-dogfood-friction-pass.md) |
+| v0.3.2.3f indbase NL v2 intent drafting | [v0.3.2.3f-indbase-nl-v2-intent-drafting.md](v0.3.2.3f-indbase-nl-v2-intent-drafting.md) |
 | v0.2 release gates | [v0.2-release-gate-checkpoint.md](v0.2-release-gate-checkpoint.md) |
 | v0.2 program entry | [v0.2-entry-plan.md](v0.2-entry-plan.md) |
 | v0.1 release manifest | [mvp-v0.1-release-manifest.json](mvp-v0.1-release-manifest.json) |

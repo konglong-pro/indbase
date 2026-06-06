@@ -34,8 +34,10 @@ For detailed product and architecture planning, use:
 - `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md` for implementation rules specific to intent drafting coordination
 - `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md` for the explicitly approved Source Trust real dogfood friction pass coordination phase
 - `docs/agents/v0.3.2.3e-source-trust-real-dogfood-friction-pass/AGENT.md` for implementation rules specific to real dogfood friction pass coordination
+- `docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md` for the explicitly approved indbase NL v2 intent drafting coordination phase
+- `docs/agents/v0.3.2.3f-indbase-nl-v2-intent-drafting/AGENT.md` for implementation rules specific to NL v2 intent drafting coordination
 
-Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. Treat `docs/planning/v0.3.2.2-tag-search-governance.md` as canonical only for the active v0.3.2.2 tag/search governance phase. Treat `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` as canonical only for the active consoler Source Trust Loop probe. Treat `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` as canonical only for probe stabilization before read-only view expansion. Treat `docs/planning/v0.3.2.3b-consoler-read-only-views.md` as canonical only for artifact-first read-only view expansion after probe stabilization. Treat `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md` as canonical only for consoler-owned Source Trust Loop dogfood UX coordination. Treat `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md` as canonical only for consoler-owned deterministic intent drafting coordination. Treat `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md` as canonical only for consoler-owned real Source Trust Loop dogfood friction coordination. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
+Treat `docs/planning/mvp-v0.1-spec.md` as the canonical v0.1 specification. Treat `docs/planning/v0.2-swallow-ingest-integration.md` as canonical only for the active v0.2 swallow ingest expansion. Treat `docs/planning/v0.2-transition-output-integration.md` as canonical only for the active v0.2 transition output expansion. Treat `docs/planning/v0.3.1-taxonomy-category-foundation.md` as canonical only for the active v0.3.1 category-only taxonomy foundation. Treat `docs/planning/v0.3.2-tag-governance-foundation.md` as canonical only for the active v0.3.2 tag governance foundation. Treat `docs/planning/v0.3.2.1-tag-harness-hardening.md` as canonical only for the active v0.3.2.1 tag harness hardening phase. Treat `docs/planning/v0.3.2.2-tag-search-governance.md` as canonical only for the active v0.3.2.2 tag/search governance phase. Treat `docs/planning/v0.3.2.3-consoler-source-trust-probe.md` as canonical only for the active consoler Source Trust Loop probe. Treat `docs/planning/v0.3.2.3a-consoler-probe-stabilization.md` as canonical only for probe stabilization before read-only view expansion. Treat `docs/planning/v0.3.2.3b-consoler-read-only-views.md` as canonical only for artifact-first read-only view expansion after probe stabilization. Treat `docs/planning/v0.3.2.3c-consoler-variant-dogfood-ux.md` as canonical only for consoler-owned Source Trust Loop dogfood UX coordination. Treat `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md` as canonical only for consoler-owned deterministic intent drafting coordination. Treat `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md` as canonical only for consoler-owned real Source Trust Loop dogfood friction coordination. Treat `docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md` as canonical only for consoler-owned indbase NL v2 assisted intent drafting coordination. When those docs conflict on conversion behavior, the v0.2 swallow ingest document supersedes the older v0.1 direct-normalizer / MarkItDown rules.
 
 Do not duplicate the full MVP specification in this file. Treat this file as the operational rulebook for agents, and treat the planning docs as the source of truth for product and architecture details.
 
@@ -59,7 +61,7 @@ Documentation rules:
 
 `indbase` is a local-first personal knowledge database. It ingests local materials into a vault, preserves originals, writes readable Markdown, records metadata and immutable revisions, chunks content, builds SQLite FTS indexes, and returns reliable search snippets tied to source chunks.
 
-The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, **v0.3.2.1 tag harness hardening**, **v0.3.2.2 tag/search governance**, **v0.3.2.3 consoler Source Trust Loop probe**, **v0.3.2.3a consoler probe stabilization**, **v0.3.2.3b consoler read-only views**, **v0.3.2.3c consoler variant dogfood UX**, **v0.3.2.3d indbase variant intent drafting coordination**, and **v0.3.2.3e Source Trust real dogfood friction pass coordination**.
+The Foundation target is **v0.1 Foundation MVP**. The currently approved expansions are **v0.2 swallow-backed ingest**, **v0.2 transition-backed output**, **v0.3.1 category-only taxonomy foundation**, **v0.3.2 tag governance foundation**, **v0.3.2.1 tag harness hardening**, **v0.3.2.2 tag/search governance**, **v0.3.2.3 consoler Source Trust Loop probe**, **v0.3.2.3a consoler probe stabilization**, **v0.3.2.3b consoler read-only views**, **v0.3.2.3c consoler variant dogfood UX**, **v0.3.2.3d indbase variant intent drafting coordination**, **v0.3.2.3e Source Trust real dogfood friction pass coordination**, and **v0.3.2.3f indbase NL v2 intent drafting coordination**.
 
 Do not implement other v0.2 or v0.3 functionality unless explicitly instructed in a task.
 
@@ -516,6 +518,28 @@ Rules:
 - Do not add new Source Trust Loop commands, title/path lookup, vault browser, source browser, full source viewer, review/category/tag mutations, doctor repair, durable vault preferences, NL v2, chat, default LLM/assisted intent, retrieval packages, `ask`, embeddings, generated answers, `indbase_core` changes, migrations, or consoler protocol/runtime/store/schema changes.
 - Do not commit private vault paths, source excerpts, private filenames/titles, private tag/category names, raw trace JSON, temp vaults, runtime SQLite files, logs, screenshots with private content, or local path secrets.
 
+### Active v0.3.2.3f Indbase NL v2 Intent Drafting
+
+The user explicitly approved consoler-owned indbase NL v2 assisted intent drafting coordination after the 3e/V4f closeout. For 3f work:
+
+```text
+single-shot NL input -> deterministic first -> explicit opt-in assisted fallback
+-> one editable Source Trust Loop form -> normal consoler lifecycle
+```
+
+Rules:
+
+- Use `docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md`, `docs/agents/v0.3.2.3f-indbase-nl-v2-intent-drafting/AGENT.md`, and `E:\consoler\docs\planning\v4g-indbase-nl-v2-intent-drafting.md` before implementation.
+- Treat 3f as consoler-owned assisted form-prefill coordination; indbase should provide docs, stable adapter contracts, and narrow adapter bug fixes only if a focused consoler V4g test proves a defect.
+- Default `pnpm tui:indbase --` must remain deterministic and offline; assisted provider calls require explicit local opt-in.
+- Provider context must exclude session vault context, history, trace, artifacts, previous results, vault DB contents, source snippets, file contents, cwd, runtime roots, provider endpoints, model names, credentials, prompts, and raw responses.
+- The assisted result must stay within the ten-command Source Trust Loop action surface from 3c.
+- Assisted suggestions must open editable forms and must not prepare, preview, approve, execute, persist raw NL/provider data, write history/trace, or fetch artifacts from NL submit alone.
+- Provider-returned `vault_path`, `source_path`, and object IDs must come from the current user text as literals; provider-returned `tag` and `category` must come from explicit filter markers.
+- Session `vault_path` may be merged only at the TUI form layer after candidate selection; it must not be sent to provider or inferred by runtime drafting.
+- Do not add indbase commands, indbase natural-language parsing, `indbase_core` changes, migrations, durable UX state, provider setup, provider storage, title/path lookup, vault browser, source browser, Web UI, review/category/tag mutations, doctor repair, retrieval packages, `ask`, embeddings, generated answers, chat, follow-up suggestions, multi-action workflows, default assisted behavior, or consoler protocol/runtime/store/schema changes unless explicitly requested.
+- Real provider smoke is optional local-only evidence and must not commit provider endpoints, model names, credentials, prompts, raw responses, private paths, source snippets, private vault content, or local path secrets.
+
 ### v0.3 Intelligent Workflow MVP
 
 Planned additions only. Do not implement during v0.1 unless explicitly requested:
@@ -903,6 +927,8 @@ If the task belongs to the approved v0.3.2.3c consoler variant dogfood UX phase,
 If the task belongs to the approved v0.3.2.3d indbase variant intent drafting phase, implement it according to `docs/planning/v0.3.2.3d-indbase-variant-intent-drafting.md`, `docs/agents/v0.3.2.3d-indbase-variant-intent-drafting/AGENT.md`, and `E:\consoler\docs\planning\v4e-indbase-variant-intent-drafting.md`.
 
 If the task belongs to the approved v0.3.2.3e Source Trust real dogfood friction pass, implement it according to `docs/planning/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md`, `docs/agents/v0.3.2.3e-source-trust-real-dogfood-friction-pass/AGENT.md`, and `E:\consoler\docs\planning\v4f-indbase-real-dogfood-friction-pass.md`.
+
+If the task belongs to the approved v0.3.2.3f indbase NL v2 intent drafting phase, implement it according to `docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md`, `docs/agents/v0.3.2.3f-indbase-nl-v2-intent-drafting/AGENT.md`, and `E:\consoler\docs\planning\v4g-indbase-nl-v2-intent-drafting.md`.
 
 If the task belongs to any other v0.2 or v0.3 area and the user did not explicitly ask to start that phase, do not implement it. Instead, preserve interfaces only if useful and keep the current stable layer intact.
 

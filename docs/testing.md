@@ -44,6 +44,10 @@ uv run python -m pytest tests/test_v0323d_indbase_intent_coordination.py -q
 # Docs/status coordination only unless indbase_agent code changes.
 # Consoler owns the V4f gate: pnpm test:v4f-indbase-real-dogfood-friction-pass
 
+# v0.3.2.3f indbase NL v2 intent drafting coordination
+uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
+# Consoler owns the V4g gate: pnpm test:v4g-indbase-nl-v2-intent-drafting
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -62,7 +66,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | C2b — v0.3.2 tag governance gate | v0.3.2 | `scripts/v032_tag_governance_release_gate.py` |
 | C2c — v0.3.2.1 tag harness gate | v0.3.2.1 | `scripts/v0321_tag_harness_release_gate.py` |
 | C2d — v0.3.2.2 tag/search governance gate | v0.3.2.2 | `scripts/v0322_tag_search_governance_release_gate.py` |
-| C2e - v0.3.2.3 consoler coordination gates | v0.3.2.3c/3d | `tests/test_v0323c_indbase_coordination.py`, `tests/test_v0323d_indbase_intent_coordination.py` |
+| C2e - v0.3.2.3 consoler coordination gates | v0.3.2.3c/3d/3f | `tests/test_v0323c_indbase_coordination.py`, `tests/test_v0323d_indbase_intent_coordination.py`, `tests/test_v0323f_indbase_nl_v2_coordination.py` |
 | retired template guard | guard | no `minimal` template in `scripts/`, `README.md`, `docs/development.md` |
 
 Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/workflows/release-dogfood.yml) — manual or weekly; uses `tests/fixtures/v02_dogfood_corpus/` or repo variable `INDB_REAL_CORPUS`.
@@ -71,7 +75,7 @@ Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/
 
 ## Pytest suite (layer A)
 
-**Total:** 345 tests collected in `tests/` (`uv run python -m pytest --collect-only`; environment-gated smoke tests skip unless their prerequisites are enabled).
+**Total:** 348 tests collected in `tests/` (`uv run python -m pytest --collect-only`; environment-gated smoke tests skip unless their prerequisites are enabled).
 
 Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["tests"]`, `pythonpath = ["src"]`).
 
@@ -130,6 +134,7 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `test_indbase_agent_readonly_views.py` | 6 | v0.3.2.3b read-only artifact views, budgets, URI errors, show/list artifact boundaries, doctor read-only semantics |
 | `test_v0323c_indbase_coordination.py` | 2 | v0.3.2.3c indbase-side manifest contract for the consoler variant action surface and artifact open/back kinds |
 | `test_v0323d_indbase_intent_coordination.py` | 3 | v0.3.2.3d indbase-side manifest/static contract for consoler-owned deterministic intent drafting and no indbase core NL parser |
+| `test_v0323f_indbase_nl_v2_coordination.py` | 3 | v0.3.2.3f indbase-side docs/manifest/static contract for consoler-owned opt-in assisted NL v2 and no indbase core NL/provider dependency |
 | `test_transition_bridge_smoke.py` | 1 | Real Node subprocess (opt-in env) |
 
 ### v0.2-specific automated proofs
@@ -300,10 +305,48 @@ Manual `pnpm tui:indbase --` was not run in this Codex shell because there is no
 
 Scope boundary: v0.3.2.3e is a consoler-owned friction pass. It did not add indbase adapter commands, indbase core features, migrations, durable UX state, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default LLM behavior, broader NL capability, or consoler protocol/runtime/store/schema changes.
 
+## Latest v0.3.2.3f / consoler v4g closeout
+
+Latest local closeout evidence recorded on 2026-06-06:
+
+```text
+E:\indbase
+uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
+  -> 3 passed
+uv run python -m compileall -q src tests scripts
+  -> passed
+uv run python -m pytest --collect-only -q
+  -> 348 collected
+
+E:\consoler
+pnpm --filter @consoler/runtime test
+  -> 14 test files passed; 85 tests passed
+pnpm --filter @consoler/agentctl test
+  -> 8 test files passed; 30 tests passed
+pnpm --filter @consoler/tui test
+  -> 14 test files passed, 1 skipped; 56 tests passed, 1 skipped
+pnpm test:v4g-indbase-nl-v2-intent-drafting
+  -> V4g indbase NL v2 intent drafting gate passed; includes pnpm build
+pnpm test:v3c-assisted-intent-gate
+  -> V3c assisted intent gate passed
+pnpm test:v3c-tui-assisted-intent-gate
+  -> V3c TUI assisted intent gate passed
+pnpm test:v4e-indbase-variant-intent-drafting
+  -> V4e indbase variant intent drafting gate passed
+pnpm test:v4f-indbase-real-dogfood-friction-pass
+  -> V4f indbase real dogfood friction pass gate passed
+pnpm typecheck
+  -> passed
+```
+
+Real-provider smoke and manual `pnpm tui:indbase --` were not run in this Codex shell. They are local-only evidence and must not be treated as release gates or documented with private provider/vault details.
+
+Scope boundary: v0.3.2.3f is consoler-owned opt-in assisted Intent Drafting for one editable Source Trust Loop form. It did not add indbase adapter commands, indbase core features, migrations, durable UX state, raw NL parsing in indbase, provider setup or persistence, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default assisted behavior, follow-up suggestions, multi-action workflows, or consoler protocol/runtime store/schema changes from indbase.
+
 ## What passing means (release bar)
 
 ```text
-345 collected
+348 collected
 compileall clean
 v02 deterministic gate passed
 doctor negative gate passed
@@ -316,6 +359,7 @@ v0323b consoler read-only views gate passed (when touching indbase_agent)
 v0323c indbase coordination contract passed (when coordinating consoler v4d)
 v0323d indbase intent coordination contract passed (when coordinating consoler v4e)
 v0323e consoler V4f friction gate passed in E:\consoler (when coordinating consoler v4f)
+v0323f indbase NL v2 coordination contract passed (when coordinating consoler v4g)
 GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1/v0.3.2.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```
