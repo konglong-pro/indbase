@@ -1,38 +1,43 @@
 # Planning
 
-Active **product specifications** and **release gate** definitions for indbase.
+Planning docs are lifecycle-managed. Do not infer active work from filename
+order.
 
-**Current status and tests** (read these first):
+Current phase identity:
 
-- [../project-status.md](../project-status.md)
-- [../testing.md](../testing.md)
+- `../phase-manifest.yaml`
+- `../active/current.md`
 
-## Active specs (do not archive)
+## Lifecycle Directories
 
-| Topic | File |
-| --- | --- |
-| v0.1 Foundation | [mvp-v0.1-spec.md](mvp-v0.1-spec.md) |
-| v0.2 swallow ingest | [v0.2-swallow-ingest-integration.md](v0.2-swallow-ingest-integration.md) |
-| v0.2 transition output | [v0.2-transition-output-integration.md](v0.2-transition-output-integration.md) |
-| v0.3.1 taxonomy category foundation | [v0.3.1-taxonomy-category-foundation.md](v0.3.1-taxonomy-category-foundation.md) |
-| v0.3.2 tag governance foundation | [v0.3.2-tag-governance-foundation.md](v0.3.2-tag-governance-foundation.md) |
-| v0.3.2.1 tag harness hardening | [v0.3.2.1-tag-harness-hardening.md](v0.3.2.1-tag-harness-hardening.md) |
-| v0.3.2.2 tag/search governance | [v0.3.2.2-tag-search-governance.md](v0.3.2.2-tag-search-governance.md) |
-| v0.3.2.3 consoler source trust probe | [v0.3.2.3-consoler-source-trust-probe.md](v0.3.2.3-consoler-source-trust-probe.md) |
-| v0.3.2.3a consoler probe stabilization | [v0.3.2.3a-consoler-probe-stabilization.md](v0.3.2.3a-consoler-probe-stabilization.md) |
-| v0.3.2.3b consoler read-only views | [v0.3.2.3b-consoler-read-only-views.md](v0.3.2.3b-consoler-read-only-views.md) |
-| v0.3.2.3c consoler variant dogfood UX | [v0.3.2.3c-consoler-variant-dogfood-ux.md](v0.3.2.3c-consoler-variant-dogfood-ux.md) |
-| v0.3.2.3d indbase variant intent drafting | [v0.3.2.3d-indbase-variant-intent-drafting.md](v0.3.2.3d-indbase-variant-intent-drafting.md) |
-| v0.3.2.3e Source Trust real dogfood friction pass | [v0.3.2.3e-source-trust-real-dogfood-friction-pass.md](v0.3.2.3e-source-trust-real-dogfood-friction-pass.md) |
-| v0.3.2.3f indbase NL v2 intent drafting | [v0.3.2.3f-indbase-nl-v2-intent-drafting.md](v0.3.2.3f-indbase-nl-v2-intent-drafting.md) |
-| v0.2 release gates | [v0.2-release-gate-checkpoint.md](v0.2-release-gate-checkpoint.md) |
-| v0.2 program entry | [v0.2-entry-plan.md](v0.2-entry-plan.md) |
-| v0.1 release manifest | [mvp-v0.1-release-manifest.json](mvp-v0.1-release-manifest.json) |
+| Directory | Meaning | Read by default |
+| --- | --- | --- |
+| `active/` | Canonical active implementation plans | yes, only when current task touches that phase |
+| `next/` | Planned but not implementation-approved work | no |
+| `archive/` | Historical plans, checkpoints, and evidence | no |
+| `superseded/` | Replaced rules or plans | no |
 
-## Archived milestones
+Legacy phase plans still present in this directory are retained for old links
+while the archive migration proceeds. Their lifecycle state is declared in
+`../phase-manifest.yaml`.
 
-Historical M3–M10 and MVP release checkpoints:
+Frozen v0.1 and shipped v0.2 planning docs have been moved under `archive/v0.1`
+and `archive/v0.2`; their old top-level filenames are compatibility pointers
+only.
+Completed v0.3.2.3 through v0.3.2.3f planning docs have been physically moved
+under `archive/`; their old top-level filenames are compatibility pointers only.
+Shipped v0.3.1 through v0.3.2.2 governance planning docs have also been moved
+under `archive/`; their old top-level filenames are compatibility pointers only.
+The broad v0.3.1 taxonomy foundation plan is superseded context, and the
+completed v0.3.2 retrieval intelligence plan is archived under
+`archive/v0.3.2-retrieval-intelligence/`.
 
-- [archive/](archive/)
+## Current Active Plan
 
-Agent implementation guides: [../agents/](../agents/)
+- `active/v0.3.3-retrieval-evaluation-answer-readiness.md`
+
+## Status And Gates
+
+- Current state: `../project-status.md`
+- Testing and gates: `../testing.md`
+- Phase lifecycle state: `../phase-manifest.yaml`

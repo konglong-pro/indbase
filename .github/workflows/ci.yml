@@ -1,4 +1,4 @@
-# v0.2 active CI — see docs/planning/v0.2-release-gate-checkpoint.md
+# v0.2 historical gate policy — see docs/planning/archive/v0.2/release-gate-checkpoint.md
 # Historical scripts/m3_dogfood_gate.py is NOT a required check here.
 
 name: CI
@@ -42,6 +42,9 @@ jobs:
 
       - name: Compileall
         run: uv run python -m compileall -q src tests scripts
+
+      - name: Docs lifecycle check
+        run: uv run python scripts/check_docs.py
 
   v02-deterministic:
     name: C — v0.2 deterministic vault + doctor negative

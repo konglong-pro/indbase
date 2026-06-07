@@ -2,7 +2,7 @@
 
 **As of:** 2026-06-06
 
-This document is the **canonical summary of what is tested and what must pass** for day-to-day development and release. For delivery scope see [project-status.md](project-status.md). For gate policy see [planning/v0.2-release-gate-checkpoint.md](planning/v0.2-release-gate-checkpoint.md).
+This document is the **canonical summary of what is tested and what must pass** for day-to-day development and release. For delivery scope see [project-status.md](project-status.md). For historical v0.2 gate policy see [planning/archive/v0.2/release-gate-checkpoint.md](planning/archive/v0.2/release-gate-checkpoint.md).
 
 ## Quick commands
 
@@ -48,6 +48,10 @@ uv run python -m pytest tests/test_v0323d_indbase_intent_coordination.py -q
 uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
 # Consoler owns the V4g gate: pnpm test:v4g-indbase-nl-v2-intent-drafting
 
+# v0.3.3 retrieval evaluation / answer readiness
+uv run python -m pytest tests/test_retrieval_evaluation.py -q
+uv run python scripts/v033_retrieval_eval_release_gate.py
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -55,6 +59,9 @@ uv run python scripts/v02_release_gate.py
 ## GitHub Actions (required on PR)
 
 Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+
+The `test` job also runs `uv run python scripts/check_docs.py` to enforce the
+documentation lifecycle gate.
 
 | Check name | Layer | Command |
 | --- | --- | --- |
@@ -67,6 +74,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 | C2c — v0.3.2.1 tag harness gate | v0.3.2.1 | `scripts/v0321_tag_harness_release_gate.py` |
 | C2d — v0.3.2.2 tag/search governance gate | v0.3.2.2 | `scripts/v0322_tag_search_governance_release_gate.py` |
 | C2e - v0.3.2.3 consoler coordination gates | v0.3.2.3c/3d/3f | `tests/test_v0323c_indbase_coordination.py`, `tests/test_v0323d_indbase_intent_coordination.py`, `tests/test_v0323f_indbase_nl_v2_coordination.py` |
+| C4 - v0.3.3 retrieval eval/readiness gate | v0.3.3 | `scripts/v033_retrieval_eval_release_gate.py` |
 | retired template guard | guard | no `minimal` template in `scripts/`, `README.md`, `docs/development.md` |
 
 Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/workflows/release-dogfood.yml) — manual or weekly; uses `tests/fixtures/v02_dogfood_corpus/` or repo variable `INDB_REAL_CORPUS`.
@@ -135,6 +143,7 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `test_v0323c_indbase_coordination.py` | 2 | v0.3.2.3c indbase-side manifest contract for the consoler variant action surface and artifact open/back kinds |
 | `test_v0323d_indbase_intent_coordination.py` | 3 | v0.3.2.3d indbase-side manifest/static contract for consoler-owned deterministic intent drafting and no indbase core NL parser |
 | `test_v0323f_indbase_nl_v2_coordination.py` | 3 | v0.3.2.3f indbase-side docs/manifest/static contract for consoler-owned opt-in assisted NL v2 and no indbase core NL/provider dependency |
+| `test_retrieval_evaluation.py` | 10 | v0.3.3 eval JSONL import/export, eval runs, answer readiness, CLI, and doctor integrity checks |
 | `test_transition_bridge_smoke.py` | 1 | Real Node subprocess (opt-in env) |
 
 ### v0.2-specific automated proofs
@@ -165,6 +174,7 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v0322_tag_search_governance_release_gate.py` | v0.3.2.2 | Governed source search harness: AND filters, filter-only snippets, JSON contract, hard gates zero |
 | `v0323a_probe_stabilization_release_gate.py` | v0.3.2.3a | Deterministic consoler Source Trust probe: ingest -> search hit -> document artifact/view, environment checks |
 | `v0323b_consoler_readonly_views_release_gate.py` | v0.3.2.3b | Isolated read-only view gate: document/review/task/error/doctor artifact views, metadata, budgets, stable URI errors, doctor read-only |
+| `v033_retrieval_eval_release_gate.py` | v0.3.3 | Deterministic eval fixture import/run, answer readiness verdict coverage, no citations writes, doctor hard = 0 |
 
 Shared helpers: `scripts/gate_common.py`.
 
@@ -194,154 +204,30 @@ uv run python scripts/v02_transition_smoke_gate.py
 # or: uv run python -m pytest tests/test_transition_bridge_smoke.py -m transition_smoke
 ```
 
-## Latest v0.3.2.3c / consoler v4d closeout
+## Closeout Archive
 
-Latest local closeout evidence recorded on 2026-06-06:
+Historical closeout evidence is retained under `docs/testing/archive/`. These
+files are not default reading; start from `docs/project-status.md` or
+`docs/phase-manifest.yaml` when doing phase archaeology.
 
-```text
-E:\indbase
-uv run python -m pytest tests/test_indbase_agent.py tests/test_indbase_agent_readonly_views.py tests/test_v0323c_indbase_coordination.py -q
-  -> 22 passed
-uv run python scripts/v0323a_probe_stabilization_release_gate.py
-  -> status=passed; search_hits=1; successful_ingest_revisions=1; all hard findings clean
-uv run python scripts/v0323b_consoler_readonly_views_release_gate.py
-  -> status=passed; all hard findings clean
-uv run python -m compileall -q src tests scripts
-  -> passed
-
-E:\consoler
-pnpm --filter @consoler/tui test
-  -> 50 passed, 1 skipped
-pnpm test:v4d-indbase-dogfood-ux
-  -> V4d indbase dogfood UX gate passed
-pnpm --filter @consoler/runtime test
-  -> 74 passed
-pnpm typecheck
-  -> passed
-pnpm build
-  -> passed
-pnpm test:real-indbase-smoke
-  -> real indbase smoke passed; optional indbase.document_revision artifact kind skipped by design when not emitted
-```
-
-Scope boundary: this closeout records the already-passing indbase adapter contracts and consoler-owned v4d TUI dogfood UX checks. It does not expand indbase commands, consoler protocol/runtime semantics, vault browsing, Web UI, mutation UI, retrieval packages, `ask`, embeddings, generated answers, or NL/intent drafting.
-
-## Latest v0.3.2.3d / consoler v4e closeout
-
-Latest local and GitHub closeout evidence recorded on 2026-06-06:
-
-```text
-E:\indbase
-uv run python -m pytest
-  -> 345 passed, 2 skipped
-uv run python -m pytest tests/test_v0323c_indbase_coordination.py tests/test_v0323d_indbase_intent_coordination.py -q
-  -> 5 passed
-uv run python -m compileall -q src tests scripts
-  -> passed
-git diff --check
-  -> passed with LF/CRLF warnings only
-
-E:\consoler
-pnpm test:v4e-indbase-variant-intent-drafting
-  -> V4e indbase variant intent drafting gate passed
-pnpm test:v4d-indbase-dogfood-ux
-  -> V4d indbase dogfood UX gate passed
-pnpm test:v2-release-gate
-  -> V2 release gate passed
-pnpm test:v3c-assisted-intent-gate
-  -> V3c assisted intent gate passed
-pnpm test:v3c-tui-assisted-intent-gate
-  -> V3c TUI assisted intent gate passed
-pnpm test:python-sdk-package
-  -> Python SDK package gate passed
-CONSOLER_KEEP_REAL_INDBASE_SMOKE=1 pnpm test:real-indbase-smoke
-  -> real indbase smoke passed
-pnpm exec vitest run packages/tui/test/real-indbase-product-tui-smoke.test.tsx
-  -> 1 test passed
-git diff --check
-  -> passed with LF/CRLF warnings only
-
-GitHub
-indbase PR #1
-  -> all visible checks passed; base main
-consoler PR #4
-  -> all visible checks passed; stacked on feat/v1k-v1l-on-main
-```
-
-Scope boundary: v0.3.2.3d closes deterministic, single-shot, variant-scoped intent drafting and editable form prefill. It does not add chat, `ask`, Web UI, vault browsing, source browsing, durable UX state, review/category/tag mutation, retrieval packages, embeddings, generated answers, default LLM behavior, indbase core features, or consoler protocol/runtime store changes.
-
-## Latest v0.3.2.3e / consoler v4f closeout
-
-Latest local closeout evidence recorded on 2026-06-06:
-
-```text
-E:\consoler
-pnpm --filter @consoler/tui test
-  -> 14 test files passed, 1 skipped; 54 tests passed, 1 skipped
-pnpm test:v4f-indbase-real-dogfood-friction-pass
-  -> V4f indbase real dogfood friction pass gate passed
-pnpm test:v4e-indbase-variant-intent-drafting
-  -> V4e indbase variant intent drafting gate passed
-pnpm test:v4d-indbase-dogfood-ux
-  -> V4d indbase dogfood UX gate passed
-pnpm typecheck
-  -> passed
-pnpm build
-  -> passed
-CONSOLER_KEEP_REAL_INDBASE_SMOKE=1 pnpm test:real-indbase-smoke
-  -> real indbase smoke passed
-pnpm exec vitest run packages/tui/test/real-indbase-product-tui-smoke.test.tsx
-  -> 1 test passed
-```
-
-Friction coverage:
-
-- fixed terminal-stable control copy for touched TUI navigation/artifact/form surfaces
-- added V4f deterministic gate and friction register
-- strengthened local-only real product TUI smoke so deterministic NL opens an editable search form with an explicit disposable vault path under the real discovered indbase manifest
-- deferred same-session continuation from a real finished doctor result to home until manual PTY confirmation
-
-Manual `pnpm tui:indbase --` was not run in this Codex shell because there is no reliable interactive PTY. The automated Ink smoke was recorded separately and was not treated as a manually typed TUI session.
-
-Scope boundary: v0.3.2.3e is a consoler-owned friction pass. It did not add indbase adapter commands, indbase core features, migrations, durable UX state, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default LLM behavior, broader NL capability, or consoler protocol/runtime/store/schema changes.
-
-## Latest v0.3.2.3f / consoler v4g closeout
-
-Latest local closeout evidence recorded on 2026-06-06:
-
-```text
-E:\indbase
-uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
-  -> 3 passed
-uv run python -m compileall -q src tests scripts
-  -> passed
-uv run python -m pytest --collect-only -q
-  -> 348 collected
-
-E:\consoler
-pnpm --filter @consoler/runtime test
-  -> 14 test files passed; 85 tests passed
-pnpm --filter @consoler/agentctl test
-  -> 8 test files passed; 30 tests passed
-pnpm --filter @consoler/tui test
-  -> 14 test files passed, 1 skipped; 56 tests passed, 1 skipped
-pnpm test:v4g-indbase-nl-v2-intent-drafting
-  -> V4g indbase NL v2 intent drafting gate passed; includes pnpm build
-pnpm test:v3c-assisted-intent-gate
-  -> V3c assisted intent gate passed
-pnpm test:v3c-tui-assisted-intent-gate
-  -> V3c TUI assisted intent gate passed
-pnpm test:v4e-indbase-variant-intent-drafting
-  -> V4e indbase variant intent drafting gate passed
-pnpm test:v4f-indbase-real-dogfood-friction-pass
-  -> V4f indbase real dogfood friction pass gate passed
-pnpm typecheck
-  -> passed
-```
-
-Real-provider smoke and manual `pnpm tui:indbase --` were not run in this Codex shell. They are local-only evidence and must not be treated as release gates or documented with private provider/vault details.
-
-Scope boundary: v0.3.2.3f is consoler-owned opt-in assisted Intent Drafting for one editable Source Trust Loop form. It did not add indbase adapter commands, indbase core features, migrations, durable UX state, raw NL parsing in indbase, provider setup or persistence, vault browser, source browser, Web UI, review/category/tag mutation, doctor repair, retrieval packages, `ask`, embeddings, generated answers, default assisted behavior, follow-up suggestions, multi-action workflows, or consoler protocol/runtime store/schema changes from indbase.
+| Phase | Closeout | Notes |
+| --- | --- | --- |
+| v0.1 | [archive/v0.1-foundation-closeout.md](testing/archive/v0.1-foundation-closeout.md) | Foundation baseline |
+| v0.2 swallow | [archive/v0.2-swallow-ingest-closeout.md](testing/archive/v0.2-swallow-ingest-closeout.md) | Swallow ingest integration |
+| v0.2 transition | [archive/v0.2-transition-output-closeout.md](testing/archive/v0.2-transition-output-closeout.md) | Transition output integration |
+| v0.3.1 broad taxonomy | [archive/v0.3.1-taxonomy-foundation-closeout.md](testing/archive/v0.3.1-taxonomy-foundation-closeout.md) | Superseded broad taxonomy plan |
+| v0.3.1 | [archive/v0.3.1-taxonomy-category-foundation-closeout.md](testing/archive/v0.3.1-taxonomy-category-foundation-closeout.md) | Taxonomy category foundation |
+| v0.3.2 | [archive/v0.3.2-tag-governance-foundation-closeout.md](testing/archive/v0.3.2-tag-governance-foundation-closeout.md) | Tag governance foundation |
+| v0.3.2 retrieval | [archive/v0.3.2-retrieval-intelligence-closeout.md](testing/archive/v0.3.2-retrieval-intelligence-closeout.md) | Retrieval intelligence foundation |
+| v0.3.2.1 | [archive/v0.3.2.1-tag-harness-hardening-closeout.md](testing/archive/v0.3.2.1-tag-harness-hardening-closeout.md) | Tag harness hardening |
+| v0.3.2.2 | [archive/v0.3.2.2-tag-search-governance-closeout.md](testing/archive/v0.3.2.2-tag-search-governance-closeout.md) | Tag/search governance |
+| v0.3.2.3 | [archive/v0.3.2.3-closeout.md](testing/archive/v0.3.2.3-closeout.md) | Source Trust probe |
+| v0.3.2.3a | [archive/v0.3.2.3a-closeout.md](testing/archive/v0.3.2.3a-closeout.md) | Probe stabilization |
+| v0.3.2.3b | [archive/v0.3.2.3b-closeout.md](testing/archive/v0.3.2.3b-closeout.md) | Read-only artifact views |
+| v0.3.2.3c | [archive/v0.3.2.3c-closeout.md](testing/archive/v0.3.2.3c-closeout.md) | Consoler variant dogfood UX |
+| v0.3.2.3d | [archive/v0.3.2.3d-closeout.md](testing/archive/v0.3.2.3d-closeout.md) | Deterministic intent drafting coordination |
+| v0.3.2.3e | [archive/v0.3.2.3e-closeout.md](testing/archive/v0.3.2.3e-closeout.md) | Real dogfood friction pass |
+| v0.3.2.3f | [archive/v0.3.2.3f-closeout.md](testing/archive/v0.3.2.3f-closeout.md) | Opt-in assisted NL v2 coordination |
 
 ## What passing means (release bar)
 
@@ -360,6 +246,7 @@ v0323c indbase coordination contract passed (when coordinating consoler v4d)
 v0323d indbase intent coordination contract passed (when coordinating consoler v4e)
 v0323e consoler V4f friction gate passed in E:\consoler (when coordinating consoler v4f)
 v0323f indbase NL v2 coordination contract passed (when coordinating consoler v4g)
+v033 retrieval eval/readiness gate passed (when touching retrieval evaluation)
 GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1/v0.3.2.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```

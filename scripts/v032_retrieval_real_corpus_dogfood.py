@@ -260,15 +260,25 @@ def main() -> None:
     report_path = root / "v032_retrieval_dogfood_report.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    md_path = ROOT / "docs/planning/v0.3.2-retrieval-dogfood-report.md"
+    md_path = ROOT / "docs/testing/archive/v0.3.2-retrieval-dogfood-report.md"
+    md_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
+        "---",
+        "doc_type: dogfood_report",
+        "phase_id: v0.3.2-retrieval-intelligence-foundation",
+        "status: archived",
+        "canonical: true",
+        "read_by_default: false",
+        "related_plan: docs/planning/archive/v0.3.2-retrieval-intelligence/retrieval-intelligence-foundation.plan.md",
+        "---",
+        "",
         "# v0.3.2 Retrieval Dogfood Report",
         "",
-        f"**Generated:** {datetime.now().isoformat()}  ",
-        f"**Vault:** `{vault}`  ",
-        f"**Corpus:** {corpus.get('source_mode')} ({corpus.get('input_files')} files)  ",
-        f"**Ingest revisions:** {ingest.written_revisions}  ",
-        f"**Profiled / total docs:** {profiled} / {doc_total}  ",
+        f"- Generated: {datetime.now().isoformat()}",
+        "- Vault: disposable local dogfood vault (path intentionally not recorded)",
+        f"- Corpus: {corpus.get('source_mode')} ({corpus.get('input_files')} files)",
+        f"- Ingest revisions: {ingest.written_revisions}",
+        f"- Profiled / total docs: {profiled} / {doc_total}",
         "",
         "## Scenarios",
         "",
@@ -278,7 +288,7 @@ def main() -> None:
         lines.append(f"- Query: `{scenario.get('query', '')}`")
         lines.append(f"- Status: {scenario.get('status')} | Items: {scenario.get('result_count', 0)}")
         if scenario.get("warnings"):
-            lines.append(f"- Warnings: {', '.join(scenario['warnings'][:5])}")
+            lines.append(f"- Warning count: {len(scenario['warnings'])}")
         if scenario.get("error"):
             lines.append(f"- Error: {scenario['error']}")
         lines.append("")
@@ -286,7 +296,7 @@ def main() -> None:
     lines.append("")
     if report["bad_examples"]:
         for item in report["bad_examples"]:
-            lines.append(f"- **{item['kind']}** ({item['scenario']}): {item['detail']}")
+            lines.append(f"- **{item['kind']}** ({item['scenario']})")
     else:
         lines.append("- No automated bad-example heuristics fired on this run.")
     lines.append("")

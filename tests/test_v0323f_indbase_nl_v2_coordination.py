@@ -27,11 +27,18 @@ def _manifest() -> dict:
 
 
 def test_v0323f_docs_route_nl_v2_to_consoler_without_expanding_indbase() -> None:
-    plan_path = Path("docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md")
-    guide_path = Path("docs/agents/v0.3.2.3f-indbase-nl-v2-intent-drafting/AGENT.md")
+    legacy_plan_path = Path("docs/planning/v0.3.2.3f-indbase-nl-v2-intent-drafting.md")
+    legacy_guide_path = Path("docs/agents/v0.3.2.3f-indbase-nl-v2-intent-drafting/AGENT.md")
+    plan_path = Path("docs/planning/archive/v0.3.2.3f/indbase-nl-v2-intent-drafting.plan.md")
+    guide_path = Path("docs/agents/archive/indbase/v0.3.2.3f-indbase-nl-v2-intent-drafting.md")
 
+    assert legacy_plan_path.is_file()
+    assert legacy_guide_path.is_file()
     assert plan_path.is_file()
     assert guide_path.is_file()
+
+    assert str(plan_path).replace("\\", "/") in legacy_plan_path.read_text(encoding="utf-8")
+    assert str(guide_path).replace("\\", "/") in legacy_guide_path.read_text(encoding="utf-8")
 
     plan = plan_path.read_text(encoding="utf-8")
     guide = guide_path.read_text(encoding="utf-8")
