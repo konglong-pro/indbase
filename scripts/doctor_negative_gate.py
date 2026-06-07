@@ -33,7 +33,7 @@ def build_healthy_v02_vault(root: Path) -> dict[str, str]:
     source = root / "healthy" / "trusted.md"
     source.parent.mkdir(parents=True)
     source.write_text(TRUSTED_MARKDOWN, encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     configure_v02_vault(vault, swallow_ingest=True, transition_output=True, web_ingest=False)
     result = run_m3_ingest_pipeline(vault, source, recursive=False)
     if result.written_revisions != 1:

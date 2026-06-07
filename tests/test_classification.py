@@ -17,7 +17,7 @@ from indbase_core.documents import archive_document, set_document_category
 from indbase_core.ingest import run_m3_ingest_pipeline
 from indbase_core.ocr import run_ocr_for_document
 from indbase_core.search import search_chunks
-from indbase_core.tags import list_document_tags
+from indbase_core.tags import add_tag, list_document_tags
 from indbase_core.vault import init_vault
 
 
@@ -25,11 +25,10 @@ def test_classification_suggest_creates_review_without_mutating_metadata(tmp_pat
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
-        category_id = add_category(connection, "AI Research")
         doc_id = connection.execute("SELECT doc_id FROM documents").fetchone()["doc_id"]
         result = suggest_classifications(connection)
         suggestion = connection.execute("SELECT * FROM classification_suggestions").fetchone()
@@ -46,7 +45,7 @@ def test_classification_suggest_creates_review_without_mutating_metadata(tmp_pat
     assert result.suggested_documents == 1
     assert result.review_items == 1
     assert suggestion["doc_id"] == doc_id
-    assert suggestion["suggested_category_id"] == category_id
+    assert suggestion["suggested_category_id"] == "cat_computer_science"
     assert suggestion["needs_user_confirmation"] == 1
     assert suggestion["status"] == "pending"
     assert "rag" in json.loads(suggestion["suggested_tags_json"])
@@ -61,13 +60,14 @@ def test_classification_accept_applies_explicit_metadata_and_records_feedback(tm
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
-        category_id = add_category(connection, "AI Research")
+        category_id = "cat_computer_science"
         suggest_classifications(connection)
         suggestion_id = connection.execute("SELECT suggestion_id FROM classification_suggestions").fetchone()[0]
+        add_tag(connection, "rag", tag_type="method")
         result = accept_classification_suggestion(connection, suggestion_id, reason="accepted in test")
         doc_id = result.doc_id
         document = connection.execute(
@@ -102,18 +102,18 @@ def test_classification_accept_applies_explicit_metadata_and_records_feedback(tm
     assert review["status"] == "resolved"
     assert review["resolved_by"] == "classification"
     assert "rag" in fts_row["tags"]
-    assert "ai research" in fts_row["category"]
+    assert "computer science" in fts_row["category"].casefold()
 
 
 def test_classification_accept_preserves_existing_manual_category_by_default(tmp_path) -> None:
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
-        suggested_category_id = add_category(connection, "AI Research")
+        suggested_category_id = "cat_computer_science"
         manual_category_id = add_category(connection, "Manual Category")
         doc_id = connection.execute("SELECT doc_id FROM documents").fetchone()["doc_id"]
         set_document_category(connection, doc_id, manual_category_id)
@@ -134,7 +134,7 @@ def test_classification_reject_records_feedback_without_metadata_changes(tmp_pat
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -168,10 +168,13 @@ def test_cli_classification_suggest_list_accept_json(tmp_path) -> None:
     assert runner.invoke(app, ["catalog", "add", "AI Research", "--vault", str(vault)]).exit_code == 0
     assert runner.invoke(app, ["ingest", str(source), "--vault", str(vault)]).exit_code == 0
 
-    suggest = runner.invoke(app, ["classify", "suggest", "--vault", str(vault), "--json"])
-    listed = runner.invoke(app, ["classify", "list", "--vault", str(vault), "--json"])
+    suggest = runner.invoke(app, ["classify", "suggest", "--vault", str(vault), "--legacy", "--json"])
+    listed = runner.invoke(app, ["classify", "list", "--vault", str(vault), "--legacy", "--json"])
     suggestion_id = json.loads(listed.output)["suggestions"][0]["suggestion_id"]
-    accepted = runner.invoke(app, ["classify", "accept", suggestion_id, "--vault", str(vault), "--json"])
+    accepted = runner.invoke(
+        app,
+        ["classify", "accept", suggestion_id, "--vault", str(vault), "--legacy", "--json"],
+    )
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
         feedback_count = connection.execute("SELECT COUNT(*) AS count FROM classification_feedback").fetchone()["count"]
@@ -189,7 +192,7 @@ def test_classification_stales_old_suggestion_after_changed_reingest(tmp_path) -
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns v1.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -224,11 +227,11 @@ def test_classification_force_category_overwrites_and_records_feedback(tmp_path)
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
-        suggested_category_id = add_category(connection, "AI Research")
+        suggested_category_id = "cat_computer_science"
         manual_category_id = add_category(connection, "Manual Category")
         doc_id = connection.execute("SELECT doc_id FROM documents").fetchone()["doc_id"]
         set_document_category(connection, doc_id, manual_category_id)
@@ -269,7 +272,7 @@ def test_classification_does_not_create_duplicate_pending_suggestions(tmp_path) 
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -300,7 +303,7 @@ def test_classification_pending_suggestion_on_archived_doc_is_hidden_and_not_acc
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -323,7 +326,7 @@ def test_classification_allows_pdf_shell_after_ocr_success(tmp_path, monkeypatch
     vault = tmp_path / "vault"
     source = tmp_path / "scan.pdf"
     source.write_bytes(b"%PDF image only")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     monkeypatch.setattr(normalizers, "_run_markitdown_file", lambda _path: " ")
     run_m3_ingest_pipeline(vault, source)
 
@@ -350,7 +353,7 @@ def test_classification_terminal_suggestions_cannot_be_reused(tmp_path) -> None:
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -377,7 +380,7 @@ def test_classification_accept_deduplicates_normalized_tags(tmp_path) -> None:
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -389,6 +392,8 @@ def test_classification_accept_deduplicates_normalized_tags(tmp_path) -> None:
             "UPDATE classification_suggestions SET suggested_tags_json = ? WHERE suggestion_id = ?",
             (json.dumps(["LLM", "llm", "large language model"]), suggestion_id),
         )
+        add_tag(connection, "LLM", tag_type="topic")
+        add_tag(connection, "large language model", tag_type="topic")
         result = accept_classification_suggestion(connection, suggestion_id)
         llm_tags = connection.execute(
             "SELECT COUNT(*) AS count FROM tags WHERE normalized_name = 'llm'"
@@ -414,7 +419,7 @@ def test_classification_confidence_gate_uses_greater_than_or_equal_threshold(tmp
     vault = tmp_path / "vault"
     source = tmp_path / "rag.md"
     source.write_text("# Threshold\nrag\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:
@@ -431,7 +436,7 @@ def test_classification_reject_does_not_pollute_fts_metadata(tmp_path) -> None:
     vault = tmp_path / "vault"
     source = tmp_path / "ai-research.md"
     source.write_text("# AI Research\nAI research uses LLM RAG vector database patterns.\n", encoding="utf-8")
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     run_m3_ingest_pipeline(vault, source)
 
     with connect(vault / ".indbase" / "db.sqlite") as connection:

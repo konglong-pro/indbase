@@ -1,0 +1,417 @@
+---
+doc_type: phase_plan
+phase_id: v0.3.2.3f
+title: Indbase NL v2 Intent Drafting
+status: completed
+canonical: true
+read_by_default: false
+closeout: docs/testing.md#latest-v0323f--consoler-v4g-closeout
+related_contracts:
+  - docs/contracts/intent-draft-contract.md
+  - docs/contracts/consoler-agent-boundary.md
+---
+
+# v0.3.2.3f Indbase NL v2 Intent Drafting
+
+Status: local closeout passed
+
+Date: 2026-06-06
+
+Phase: v0.3.2.3f coordination for consoler-owned indbase NL v2 assisted intent drafting
+
+Related docs:
+
+- [v0.3.2.3e Source Trust Real Dogfood Friction Pass](../v0.3.2.3e/source-trust-real-dogfood-friction-pass.plan.md)
+- [v0.3.2.3d Indbase Variant Intent Drafting](../v0.3.2.3d/indbase-variant-intent-drafting.plan.md)
+- [v0.3.2.3f Agent Guide](../../../agents/archive/indbase/v0.3.2.3f-indbase-nl-v2-intent-drafting.md)
+- `E:\consoler\docs\planning\v4g-indbase-nl-v2-intent-drafting.md`
+- `E:\consoler\docs\adr\0007-indbase-nl-v2-intent-drafting.md`
+- `E:\consoler\docs\adr\0004-llm-assisted-intent-drafting.md`
+- `E:\consoler\docs\adr\0003-natural-language-intent-drafting.md`
+- `E:\consoler\docs\adr\0006-product-variants-keep-agent-specific-ui-boundaries.md`
+- `E:\consoler\CONTEXT.md`
+- [indbase glossary](../../../../CONTEXT.md)
+
+## Objective
+
+Coordinate consoler V4g so `pnpm tui:indbase --` can use explicitly opted-in assisted intent drafting for the existing Source Trust Loop without expanding indbase.
+
+The product path is:
+
+```text
+single-shot NL input
+-> deterministic indbase variant mapper first
+-> optional assisted provider only when deterministic drafting is insufficient
+-> one reviewable Source Trust Loop action candidate or clarification
+-> editable schema form with conservative prefilled_args
+-> normal consoler prepare / preview / approval / execute lifecycle
+```
+
+This phase is consoler-owned. It is not an indbase natural-language parser, not `ask`, not chat, and not an indbase core feature.
+
+## Scope
+
+In scope for the overall phase:
+
+- explicit local opt-in for assisted indbase variant drafting
+- deterministic-first assisted orchestration
+- provider context audit
+- provider suggestion validation and fallback
+- message hygiene for provider explanations
+- TUI transient assisted notices
+- fake-provider V4g gate
+- optional local-only real provider smoke
+- indbase-side planning, agent routing, and coordination tests
+
+In scope for `E:\indbase` only:
+
+- this planning document
+- `docs/agents/archive/indbase/v0.3.2.3f-indbase-nl-v2-intent-drafting.md`
+- `AGENTS.md` routing
+- `CONTEXT.md` glossary entry
+- `docs/planning/README.md` routing
+- optional `tests/test_v0323f_indbase_nl_v2_coordination.py`
+- optional status/testing closeout docs after V4g implementation evidence exists
+- narrow `indbase_agent` fix only if a focused V4g test proves an existing adapter contract defect
+
+Out of scope:
+
+- new indbase commands
+- `indbase_core` changes
+- indbase natural-language parsing
+- sending raw natural language to `indbase_agent`
+- migrations
+- durable UX state or vault preference storage
+- provider setup in indbase
+- provider credentials, endpoint, model, prompt, or response storage
+- title/path lookup
+- vault discovery, vault list, vault browser, source browser, or full source viewer
+- review/category/tag mutation
+- doctor repair
+- retrieval packages
+- `ask`
+- embeddings
+- generated answers
+- chat
+- multi-action workflows
+- follow-up suggestions
+- default LLM/assisted behavior
+- consoler protocol, runtime lifecycle, runtime store schema, replay, transport, or Python SDK changes from this repo
+- default CI dependency on real providers, network access, real `E:\indbase`, private vaults, manual TUI, or real swallow
+
+## Accepted Decisions
+
+### Phase ownership
+
+`consoler` owns V4g implementation:
+
+- assisted intent orchestration/use in product TUI
+- provider opt-in wiring
+- provider context audit
+- provider suggestion validation/fallback
+- TUI notices and form behavior
+- V4g gate and CI
+- ADR/docs
+
+`indbase` owns coordination:
+
+- stable Source Trust command and artifact contracts
+- phase boundary docs
+- AGENTS routing
+- optional coordination tests
+- narrow adapter bug fixes only when proven
+
+`indbase_core` owns nothing in this phase.
+
+### Default remains deterministic
+
+The normal `pnpm tui:indbase --` path must remain deterministic and offline.
+
+Assisted drafting requires explicit local opt-in. A configured provider endpoint alone must not make the product TUI send user text to a provider.
+
+### Provider context boundary
+
+Allowed provider context:
+
+- current user text
+- indbase-scoped `IntentScope`
+- scoped product labels
+- action hints
+- field labels and hints
+- schema field names, primitive types, required fields, descriptions, enum values, and bounds already present in the scope
+
+Forbidden provider context:
+
+- session-local `vault_path`
+- action history
+- trace records
+- artifact blocks
+- artifact metadata
+- previous action args
+- previous user inputs
+- latest or selected result state
+- vault database paths or contents
+- source snippets
+- file contents
+- filesystem reads
+- cwd
+- `CONSOLER_ROOT`
+- provider endpoints
+- provider model names
+- credentials
+- prompts
+- raw provider responses
+
+If the user explicitly types a vault path or source path in the current NL input, that text may be present because it is part of the current user text. Session-local vault memory must not be sent to the provider.
+
+### Source Trust action surface
+
+V4g remains limited to the ten Source Trust commands:
+
+```text
+indbase.doctor
+indbase.ingest_file
+indbase.search_sources
+indbase.doc_show
+indbase.review_list
+indbase.review_show
+indbase.task_list
+indbase.task_show
+indbase.error_list
+indbase.error_show
+```
+
+No new indbase command is added for NL v2.
+
+### Reviewable form only
+
+Assisted drafting may produce one candidate or partial candidate. It must open an editable form and then use the normal consoler lifecycle only after the user submits the form.
+
+NL submit alone must not:
+
+- prepare
+- preview
+- approve
+- execute
+- write history
+- write trace
+- fetch artifacts
+- persist raw NL
+- persist provider request/response
+
+### Session vault context
+
+TUI session `vault_path` remains form-layer convenience only.
+
+It may be merged into an editable form after a candidate or partial candidate is selected. It must not be provided to the runtime mapper or assisted provider as context.
+
+### Governed filters and IDs
+
+Provider-returned `tag` and `category` may be accepted only from explicit marker syntax in the current user text, such as `tag:<ref>`, `category:<ref>`, `with tag <ref>`, or `in category <ref>`.
+
+Provider-returned `vault_path`, `source_path`, `doc_id`, `review_id`, `task_id`, and `error_id` must appear as literal substrings in the current user text.
+
+Indbase validates tag/category existence and lifecycle only during normal command execution. V4g must not query the vault catalog or DB during drafting.
+
+### Provider message
+
+Provider `message` may be shown only as a short transient drafting explanation after hygiene checks. It is not:
+
+- trusted source evidence
+- search explanation
+- citation
+- audit data
+- persisted history
+- machine decision contract
+
+If the message fails hygiene checks but the command/args are valid, consoler may drop the raw message and still use the candidate.
+
+### Result shape
+
+Do not expand the public intent draft result shape in V4g. Reuse existing `candidate`, `needs_clarification`, `prefilled_args`, `partial_candidate`, `message`, and `assist_notice` fields.
+
+### Real provider smoke
+
+Real provider smoke is optional and local-only. It must not be a default CI or release gate. Evidence must not include provider endpoint, model, credentials, prompt, raw response, private paths, source snippets, or private vault content.
+
+## Implementation Plan
+
+The implementation belongs in:
+
+```text
+E:\consoler\docs\planning\v4g-indbase-nl-v2-intent-drafting.md
+```
+
+Indbase-side work should stay limited to:
+
+1. Keep this planning document and the 3f agent guide current.
+2. Update `AGENTS.md` phase routing.
+3. Update `docs/planning/README.md`.
+4. Keep `CONTEXT.md` glossary aligned with consoler.
+5. Add a small coordination test if it can prove boundaries without importing consoler or touching runtime behavior.
+6. Update `docs/project-status.md` and `docs/testing.md` only after V4g implementation evidence exists.
+7. If V4g exposes a true adapter contract bug, add a focused adapter test before fixing it.
+
+Do not change `indbase_core` for 3f.
+
+## Coordination Test Plan
+
+If adding `tests/test_v0323f_indbase_nl_v2_coordination.py`, keep it documentation/contract focused.
+
+It should assert that:
+
+- the 3f planning doc exists
+- the 3f agent guide exists
+- `AGENTS.md` routes 3f to the indbase and consoler docs
+- `CONTEXT.md` defines `Indbase NL v2 Intent Drafting`
+- the docs state consoler owns implementation
+- the docs state `indbase_core` has no phase work
+- the docs state `indbase_agent` does not receive raw NL
+- the docs list the ten-command Source Trust surface
+- the docs forbid new indbase commands, `ask`, generated answers, chat, workflow automation, provider context from vault/history/trace/artifacts/source, and default assisted behavior
+
+It should not:
+
+- import consoler packages
+- run TUI
+- call a provider
+- require network
+- inspect private vaults
+- assert exact long prose
+
+## Required Validation
+
+Indbase documentation-only checks:
+
+```powershell
+git diff --check
+```
+
+If an indbase coordination test is added:
+
+```powershell
+uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
+uv run python -m compileall -q src tests scripts
+```
+
+If any adapter code is touched:
+
+```powershell
+uv run python -m pytest tests/test_indbase_agent.py tests/test_indbase_agent_readonly_views.py -q
+uv run python scripts/v0323a_probe_stabilization_release_gate.py
+uv run python scripts/v0323b_consoler_readonly_views_release_gate.py
+uv run python -m compileall -q src tests scripts
+```
+
+Consoler implementation checks, run from `E:\consoler` after V4g implementation:
+
+```powershell
+pnpm --filter @consoler/runtime test
+pnpm --filter @consoler/agentctl test
+pnpm --filter @consoler/tui test
+pnpm test:v3c-assisted-intent-gate
+pnpm test:v3c-tui-assisted-intent-gate
+pnpm test:v4e-indbase-variant-intent-drafting
+pnpm test:v4f-indbase-real-dogfood-friction-pass
+pnpm test:v4g-indbase-nl-v2-intent-drafting
+pnpm typecheck
+pnpm build
+git diff --check
+```
+
+Run if shared deterministic intent behavior is touched:
+
+```powershell
+pnpm test:v3b-intent-gate
+```
+
+Local-only evidence:
+
+```powershell
+pnpm test:real-indbase-smoke
+pnpm exec vitest run packages/tui/test/real-indbase-product-tui-smoke.test.tsx
+pnpm tui:indbase --
+```
+
+Optional real provider smoke remains local-only and may be reported as not run with reason.
+
+## Acceptance Checklist
+
+- V4g remains consoler-owned.
+- Default `pnpm tui:indbase --` remains deterministic and offline.
+- Assisted provider calls require explicit local opt-in.
+- Provider request context is audited and excludes session vault, history, trace, artifacts, previous results, vault contents, source snippets, file contents, cwd, runtime roots, and provider internals.
+- Provider suggestions stay within the ten Source Trust commands.
+- Provider suggestions open editable forms and never execute directly.
+- Provider `vault_path`, `source_path`, and object IDs must come from the current user text as literals.
+- Provider `tag` and `category` require explicit filter markers in current user text.
+- Provider messages are short, hygienic, transient, and non-persistent.
+- Raw NL, provider request/response, prompt/context snapshots, and intent drafts are not persisted.
+- No follow-up suggestions, multi-action workflows, latest-result inference, chat, `ask`, generated answers, or vault/source browsing is added.
+- No indbase core feature, new command, migration, natural-language parser, durable UX state, provider setup, review/category/tag mutation, doctor repair, retrieval package, embedding, or generated answer is added.
+- No consoler protocol/runtime store/schema/replay/transport/Python SDK change is introduced from indbase.
+- V4g fake-provider gate passes in consoler.
+- Indbase coordination test passes if added.
+- Closeout docs report commands run, commands not run, CI status when delivery is requested, remaining risks, and local-only provider smoke status.
+
+## CI and Delivery Closeout
+
+CI/push is not part of this planning-only step.
+
+When delivery is requested after implementation:
+
+1. Re-run local required gates.
+2. Commit and push both repositories if both have changes.
+3. Update the existing PRs or create new PRs according to the current branch strategy.
+4. Watch GitHub CI in a bounded window.
+5. Update `docs/project-status.md`, `docs/testing.md`, and consoler testing docs with actual CI evidence only after checks pass.
+6. Report any skipped real provider, real indbase, or manual TUI evidence with explicit reasons.
+
+Do not write `passed` evidence before commands actually pass.
+
+## Implementation Closeout
+
+Local closeout recorded on 2026-06-06.
+
+Indbase-side work remained coordination-only:
+
+- `AGENTS.md`, `CONTEXT.md`, and `docs/planning/README.md` route v0.3.2.3f.
+- This planning doc and the 3f agent guide describe the consoler-owned boundary.
+- `tests/test_v0323f_indbase_nl_v2_coordination.py` verifies the docs/manifest/static contract.
+- `docs/project-status.md` and `docs/testing.md` record the local closeout evidence.
+
+Consoler V4g implemented the actual opt-in assisted drafting behavior and fake-provider gate in `E:\consoler`.
+
+Closeout evidence:
+
+```text
+E:\indbase
+uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
+  -> 3 passed
+uv run python -m compileall -q src tests scripts
+  -> passed
+
+E:\consoler
+pnpm test:v4g-indbase-nl-v2-intent-drafting
+  -> V4g indbase NL v2 intent drafting gate passed
+pnpm test:v3c-assisted-intent-gate
+  -> V3c assisted intent gate passed
+pnpm test:v3c-tui-assisted-intent-gate
+  -> V3c TUI assisted intent gate passed
+pnpm test:v4e-indbase-variant-intent-drafting
+  -> V4e indbase variant intent drafting gate passed
+pnpm test:v4f-indbase-real-dogfood-friction-pass
+  -> V4f indbase real dogfood friction pass gate passed
+pnpm typecheck
+  -> passed
+```
+
+Real-provider smoke and manual TUI dogfood were not run in this Codex shell and remain local-only optional evidence.
+
+Boundary check: no indbase command, `indbase_core` feature, adapter behavior, migration, durable UX state, raw NL parser, provider setup/persistence, vault/source browser, Web UI, review/category/tag mutation, doctor repair, retrieval package, `ask`, embedding, generated answer, default assisted behavior, follow-up suggestion, multi-action workflow, or consoler protocol/runtime/store/schema change was added from indbase.
+
+## Unknowns
+
+- Whether consoler's existing `IntentScope` needs a safer provider-facing projection to remove unnecessary metadata in a future provider phase.
+- Whether local real provider smoke will be available during closeout.
+- Whether future phases should add follow-up suggestions; 3f deliberately defers them.

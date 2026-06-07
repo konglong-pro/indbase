@@ -30,7 +30,7 @@ def main() -> None:
         print("V02_TRANSITION_SMOKE_GATE=skipped")
         return
 
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     if env_enabled("INDBASE_TRANSITION_SMOKE_INSTALL"):
         install_runtime(vault, run_npm_install=True)
     else:

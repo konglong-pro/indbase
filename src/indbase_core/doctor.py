@@ -20,6 +20,7 @@ from indbase_core.conversion import hash_markdown
 from indbase_core.db import connect, load_migrations
 from indbase_core.paths import vault_paths
 from indbase_core.search_text import build_fts_text
+from indbase_core.taxonomy import TAG_TYPES
 
 
 OCR_SIDECAR_SUFFIXES = (".ocr.txt", ".ocr.json")
@@ -193,6 +194,10 @@ def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
             findings.extend(_check_swallow_artifact_integrity(connection, vault_root))
             findings.extend(_check_output_run_integrity(connection, vault_root))
             findings.extend(_check_review_queue(connection))
+            findings.extend(_check_taxonomy_integrity(connection))
+            findings.extend(_check_tag_governance_integrity(connection))
+            findings.extend(_check_retrieval_integrity(connection))
+            findings.extend(_check_retrieval_evaluation_integrity(connection))
         finally:
             connection.close()
     except sqlite3.Error as exc:
@@ -2256,6 +2261,849 @@ def _check_output_run_integrity(connection: sqlite3.Connection, vault_root: Path
                     )
                 )
     return findings
+
+
+def _taxonomy_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'document_profiles'
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _check_taxonomy_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _taxonomy_schema_ready(connection):
+        return []
+
+    findings: list[DoctorFinding] = []
+    allowed_types = ", ".join(f"'{value}'" for value in sorted(TAG_TYPES))
+
+    invalid_tag_rows = connection.execute(
+        f"""
+        SELECT tag_id, name, type
+        FROM tags
+        WHERE deleted_at IS NULL
+          AND status = 'active'
+          AND (type IS NULL OR type NOT IN ({allowed_types}))
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in invalid_tag_rows:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_invalid_type",
+                f"Tag {row['tag_id']} ({row['name']}) has invalid or missing type: {row['type']!r}",
+            )
+        )
+
+    alias_collisions = connection.execute(
+        """
+        SELECT normalized_alias, COUNT(*) AS count
+        FROM tag_aliases
+        WHERE deleted_at IS NULL
+        GROUP BY normalized_alias
+        HAVING COUNT(*) > 1
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in alias_collisions:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_alias_collision",
+                f"Alias collision for normalized alias {row['normalized_alias']} ({row['count']} rows).",
+            )
+        )
+
+    dangling_document_tags = connection.execute(
+        """
+        SELECT dt.doc_id, dt.tag_id
+        FROM document_tags dt
+        LEFT JOIN tags t ON t.tag_id = dt.tag_id
+        WHERE dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND t.tag_id IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in dangling_document_tags:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "document_tag_missing_tag",
+                f"Document tag assignment {row['doc_id']} -> {row['tag_id']} references a missing tag.",
+            )
+        )
+
+    dangling_doc_refs = connection.execute(
+        """
+        SELECT dt.doc_id, dt.tag_id
+        FROM document_tags dt
+        LEFT JOIN documents d ON d.doc_id = dt.doc_id
+        WHERE dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND d.doc_id IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in dangling_doc_refs:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "document_tag_missing_doc",
+                f"Document tag assignment references missing document {row['doc_id']}.",
+            )
+        )
+
+    inactive_assignments = connection.execute(
+        """
+        SELECT dt.doc_id, dt.tag_id, t.status AS tag_status
+        FROM document_tags dt
+        JOIN tags t ON t.tag_id = dt.tag_id
+        WHERE dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND t.status != 'active'
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in inactive_assignments:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "document_tag_inactive_tag",
+                f"Document {row['doc_id']} is assigned inactive tag {row['tag_id']} (status={row['tag_status']}).",
+            )
+        )
+
+    stale_profiles = connection.execute(
+        """
+        SELECT dp.profile_id, dp.doc_id, dp.revision_id
+        FROM document_profiles dp
+        JOIN documents d ON d.doc_id = dp.doc_id
+        WHERE dp.status = 'active'
+          AND d.deleted_at IS NULL
+          AND d.current_revision_id IS NOT NULL
+          AND dp.revision_id != d.current_revision_id
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in stale_profiles:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "profile_for_old_revision_marked_active",
+                f"Profile {row['profile_id']} is active for old revision {row['revision_id']} on doc {row['doc_id']}.",
+            )
+        )
+
+    archived_profiles = connection.execute(
+        """
+        SELECT dp.profile_id, dp.doc_id
+        FROM document_profiles dp
+        JOIN documents d ON d.doc_id = dp.doc_id
+        WHERE dp.status = 'active'
+          AND d.status = 'archived'
+          AND d.deleted_at IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in archived_profiles:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "profile_for_archived_doc_marked_active",
+                f"Profile {row['profile_id']} is active for archived document {row['doc_id']}.",
+            )
+        )
+
+    source_shell_profiles = connection.execute(
+        """
+        SELECT dp.profile_id, dp.doc_id
+        FROM document_profiles dp
+        JOIN documents d ON d.doc_id = dp.doc_id
+        WHERE dp.status = 'active'
+          AND d.deleted_at IS NULL
+          AND d.current_revision_id IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in source_shell_profiles:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "profile_for_source_shell",
+                f"Profile {row['profile_id']} exists for source shell document {row['doc_id']}.",
+            )
+        )
+
+    dangling_profiles = connection.execute(
+        """
+        SELECT dp.profile_id, dp.doc_id, dp.revision_id
+        FROM document_profiles dp
+        LEFT JOIN documents d ON d.doc_id = dp.doc_id
+        LEFT JOIN document_revisions dr ON dr.revision_id = dp.revision_id
+        WHERE d.doc_id IS NULL OR dr.revision_id IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in dangling_profiles:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "profile_dangling_reference",
+                f"Profile {row['profile_id']} references missing doc/revision ({row['doc_id']}, {row['revision_id']}).",
+            )
+        )
+
+    dangling_features = connection.execute(
+        """
+        SELECT fa.feature_id, fa.chunk_id
+        FROM feature_atoms fa
+        LEFT JOIN chunks c ON c.chunk_id = fa.chunk_id
+        WHERE c.chunk_id IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in dangling_features:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "feature_atom_missing_chunk",
+                f"Feature atom {row['feature_id']} references missing chunk {row['chunk_id']}.",
+            )
+        )
+
+    wrong_revision_features = connection.execute(
+        """
+        SELECT fa.feature_id, fa.doc_id, fa.revision_id, fa.chunk_id
+        FROM feature_atoms fa
+        JOIN chunks c ON c.chunk_id = fa.chunk_id
+        WHERE fa.status = 'active'
+          AND (c.doc_id != fa.doc_id OR c.revision_id != fa.revision_id)
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in wrong_revision_features:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "feature_atom_wrong_revision",
+                f"Feature atom {row['feature_id']} chunk binding does not match doc/revision.",
+            )
+        )
+
+    missing_evidence_candidates = connection.execute(
+        """
+        SELECT candidate_id, name
+        FROM tag_candidates
+        WHERE evidence_doc_ids_json IS NULL
+           OR evidence_doc_ids_json = '[]'
+           OR evidence_chunk_ids_json IS NULL
+           OR evidence_chunk_ids_json = '[]'
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in missing_evidence_candidates:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_candidate_missing_evidence",
+                f"Tag candidate {row['candidate_id']} ({row['name']}) is missing evidence.",
+            )
+        )
+
+    promoted_without_tag = connection.execute(
+        """
+        SELECT tc.candidate_id, tc.promoted_tag_id
+        FROM tag_candidates tc
+        WHERE tc.status = 'accepted'
+          AND (
+            tc.promoted_tag_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM tags t WHERE t.tag_id = tc.promoted_tag_id
+            )
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in promoted_without_tag:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_candidate_promoted_without_tag",
+                f"Tag candidate {row['candidate_id']} is accepted without a valid promoted tag.",
+            )
+        )
+
+    dangling_taxonomy_suggestions = connection.execute(
+        """
+        SELECT ts.suggestion_id, ts.doc_id, ts.revision_id
+        FROM taxonomy_suggestions ts
+        LEFT JOIN documents d ON d.doc_id = ts.doc_id
+        LEFT JOIN document_revisions dr ON dr.revision_id = ts.revision_id
+        WHERE ts.type IN ('category_assign', 'tag_assign', 'tag_candidate')
+          AND (
+            (ts.doc_id IS NOT NULL AND d.doc_id IS NULL)
+            OR (ts.revision_id IS NOT NULL AND dr.revision_id IS NULL)
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in dangling_taxonomy_suggestions:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "taxonomy_suggestion_dangling_reference",
+                f"Taxonomy suggestion {row['suggestion_id']} references missing doc/revision.",
+            )
+        )
+
+    invalid_category_suggestions = connection.execute(
+        """
+        SELECT ts.suggestion_id, json_extract(ts.payload_json, '$.category_id') AS category_id
+        FROM taxonomy_suggestions ts
+        WHERE ts.type = 'category_assign'
+          AND json_extract(ts.payload_json, '$.category_id') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM categories c
+            WHERE c.category_id = json_extract(ts.payload_json, '$.category_id')
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in invalid_category_suggestions:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "taxonomy_suggestion_invalid_category",
+                f"Taxonomy suggestion {row['suggestion_id']} targets missing category {row['category_id']}.",
+            )
+        )
+
+    invalid_tag_suggestions = connection.execute(
+        """
+        SELECT ts.suggestion_id, json_extract(ts.payload_json, '$.tag_id') AS tag_id
+        FROM taxonomy_suggestions ts
+        WHERE ts.type = 'tag_assign'
+          AND json_extract(ts.payload_json, '$.tag_id') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM tags t WHERE t.tag_id = json_extract(ts.payload_json, '$.tag_id')
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in invalid_tag_suggestions:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "taxonomy_suggestion_invalid_tag",
+                f"Taxonomy suggestion {row['suggestion_id']} targets missing tag {row['tag_id']}.",
+            )
+        )
+
+    return findings
+
+
+def _tag_governance_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'tagger_runs'
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _check_tag_governance_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _tag_governance_schema_ready(connection):
+        return []
+
+    findings: list[DoctorFinding] = []
+
+    alias_missing_tag = connection.execute(
+        """
+        SELECT ta.alias_id, ta.alias
+        FROM tag_aliases ta
+        LEFT JOIN tags t ON t.tag_id = ta.tag_id
+        WHERE ta.deleted_at IS NULL
+          AND t.tag_id IS NULL
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in alias_missing_tag:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_alias_points_missing_tag",
+                f"Alias {row['alias_id']} ({row['alias']}) points to a missing tag.",
+            )
+        )
+
+    merged_target_missing = connection.execute(
+        """
+        SELECT tag_id, name, merged_into_tag_id
+        FROM tags
+        WHERE deleted_at IS NULL
+          AND merged_into_tag_id IS NOT NULL
+          AND merged_into_tag_id NOT IN (
+            SELECT tag_id FROM tags WHERE deleted_at IS NULL
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in merged_target_missing:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_merged_target_missing",
+                f"Tag {row['tag_id']} ({row['name']}) merges into missing tag {row['merged_into_tag_id']}.",
+            )
+        )
+
+    auto_without_evidence = connection.execute(
+        """
+        SELECT dt.doc_id, dt.tag_id
+        FROM document_tags dt
+        WHERE dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND dt.source = 'auto'
+          AND (
+            dt.evidence_chunk_ids_json IS NULL
+            OR TRIM(dt.evidence_chunk_ids_json) IN ('', '[]')
+          )
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in auto_without_evidence:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "auto_attached_tag_without_evidence",
+                f"Auto-attached tag {row['tag_id']} on {row['doc_id']} lacks evidence chunks.",
+            )
+        )
+
+    auto_inactive_tag = connection.execute(
+        """
+        SELECT dt.doc_id, dt.tag_id, t.status AS tag_status
+        FROM document_tags dt
+        JOIN tags t ON t.tag_id = dt.tag_id
+        WHERE dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND dt.source = 'auto'
+          AND t.status IN ('deprecated', 'archived', 'merged')
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in auto_inactive_tag:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "auto_attached_deprecated_or_archived",
+                f"Auto-attached tag {row['tag_id']} on {row['doc_id']} is {row['tag_status']}.",
+            )
+        )
+
+    pending_without_resolution = connection.execute(
+        """
+        SELECT candidate_id, name
+        FROM tag_candidates
+        WHERE status = 'pending'
+          AND candidate_type IS NOT NULL
+          AND (resolution_status IS NULL OR TRIM(resolution_status) = '')
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in pending_without_resolution:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_candidate_without_resolution",
+                f"Governance candidate {row['candidate_id']} ({row['name']}) lacks resolution_status.",
+            )
+        )
+
+    candidate_missing_run = connection.execute(
+        """
+        SELECT candidate_id
+        FROM tag_candidates
+        WHERE tagger_run_id IS NOT NULL
+          AND tagger_run_id NOT IN (SELECT tagger_run_id FROM tagger_runs)
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in candidate_missing_run:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "tag_candidate_missing_run",
+                f"Tag candidate {row['candidate_id']} references a missing tagger run.",
+            )
+        )
+
+    formal_count = connection.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM tags
+        WHERE deleted_at IS NULL
+          AND status = 'active'
+        """
+    ).fetchone()["count"]
+    if int(formal_count or 0) > 500:
+        findings.append(
+            DoctorFinding(
+                "warning",
+                "formal_tag_soft_limit_exceeded",
+                f"Active formal tag count {formal_count} exceeds the soft limit of 500.",
+            )
+        )
+
+    return findings
+
+
+def _retrieval_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'retrieval_runs'
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _check_retrieval_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _retrieval_schema_ready(connection):
+        return []
+
+    findings: list[DoctorFinding] = []
+    runs = connection.execute(
+        """
+        SELECT retrieval_run_id, filters_json, planner_json, warnings_json,
+               result_count, status
+        FROM retrieval_runs
+        ORDER BY created_at DESC
+        LIMIT 200
+        """
+    ).fetchall()
+    for row in runs:
+        run_id = str(row["retrieval_run_id"])
+        for field, code in (
+            ("filters_json", "retrieval_run_invalid_json"),
+            ("planner_json", "retrieval_run_invalid_json"),
+            ("warnings_json", "retrieval_run_invalid_json"),
+        ):
+            raw = row[field]
+            try:
+                json.loads(str(raw or "{}"))
+            except json.JSONDecodeError:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        code,
+                        f"Retrieval run {run_id} has invalid {field}.",
+                    )
+                )
+        item_count = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM retrieval_items
+            WHERE retrieval_run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()["count"]
+        expected = int(row["result_count"] or 0)
+        if int(item_count) != expected:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_run_count_mismatch",
+                    f"Retrieval run {run_id} result_count={expected} but items={item_count}.",
+                )
+            )
+
+    items = connection.execute(
+        """
+        SELECT ri.retrieval_item_id, ri.retrieval_run_id, ri.rank, ri.doc_id,
+               ri.revision_id, ri.chunk_id, ri.quote,
+               rr.retrieval_run_id AS run_exists
+        FROM retrieval_items ri
+        LEFT JOIN retrieval_runs rr ON rr.retrieval_run_id = ri.retrieval_run_id
+        ORDER BY ri.created_at DESC
+        LIMIT 500
+        """
+    ).fetchall()
+    seen_ranks: dict[str, set[int]] = {}
+    for row in items:
+        item_id = str(row["retrieval_item_id"])
+        run_id = str(row["retrieval_run_id"])
+        if row["run_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_run",
+                    f"Retrieval item {item_id} references missing run {run_id}.",
+                )
+            )
+        rank = int(row["rank"])
+        seen_ranks.setdefault(run_id, set())
+        if rank in seen_ranks[run_id]:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_invalid_rank",
+                    f"Retrieval run {run_id} has duplicate rank {rank}.",
+                )
+            )
+        seen_ranks[run_id].add(rank)
+
+        doc = connection.execute(
+            "SELECT doc_id FROM documents WHERE doc_id = ?",
+            (row["doc_id"],),
+        ).fetchone()
+        if doc is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_doc",
+                    f"Retrieval item {item_id} references missing document {row['doc_id']}.",
+                )
+            )
+        revision = connection.execute(
+            "SELECT revision_id FROM document_revisions WHERE revision_id = ?",
+            (row["revision_id"],),
+        ).fetchone()
+        if revision is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_revision",
+                    f"Retrieval item {item_id} references missing revision {row['revision_id']}.",
+                )
+            )
+        chunk = connection.execute(
+            "SELECT chunk_id, revision_id, text FROM chunks WHERE chunk_id = ?",
+            (row["chunk_id"],),
+        ).fetchone()
+        if chunk is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_missing_chunk",
+                    f"Retrieval item {item_id} references missing chunk {row['chunk_id']}.",
+                )
+            )
+            continue
+        if str(chunk["revision_id"]) != str(row["revision_id"]):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_wrong_revision",
+                    f"Retrieval item {item_id} revision does not match chunk revision.",
+                )
+            )
+        quote = str(row["quote"] or "")
+        if not quote.strip():
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_quote_missing",
+                    f"Retrieval item {item_id} has an empty quote.",
+                )
+            )
+        elif quote.strip() not in str(chunk["text"]):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_item_quote_not_in_chunk",
+                    f"Retrieval item {item_id} quote is not an exact substring of chunk text.",
+                )
+            )
+    return findings
+
+
+def _eval_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'retrieval_eval_cases'
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _check_retrieval_evaluation_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _eval_schema_ready(connection):
+        return []
+
+    findings: list[DoctorFinding] = []
+    for row in connection.execute(
+        """
+        SELECT eval_case_id, options_json, expectations_json, status
+        FROM retrieval_eval_cases
+        ORDER BY created_at DESC
+        LIMIT 200
+        """
+    ).fetchall():
+        case_id = str(row["eval_case_id"])
+        for field, code in (
+            ("options_json", "retrieval_eval_case_invalid_json"),
+            ("expectations_json", "retrieval_eval_case_invalid_json"),
+        ):
+            try:
+                json.loads(str(row[field] or "{}"))
+            except json.JSONDecodeError:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        code,
+                        f"Eval case {case_id} has invalid {field}.",
+                    )
+                )
+        if str(row["status"]) not in {"active", "archived"}:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_case_invalid_json",
+                    f"Eval case {case_id} has invalid status.",
+                )
+            )
+
+    for row in connection.execute(
+        """
+        SELECT er.eval_result_id, er.eval_run_id, er.eval_case_id, er.retrieval_run_id,
+               run.eval_run_id AS run_exists, case_row.eval_case_id AS case_exists,
+               rr.retrieval_run_id AS retrieval_exists
+        FROM retrieval_eval_results er
+        LEFT JOIN retrieval_eval_runs run ON run.eval_run_id = er.eval_run_id
+        LEFT JOIN retrieval_eval_cases case_row ON case_row.eval_case_id = er.eval_case_id
+        LEFT JOIN retrieval_runs rr ON rr.retrieval_run_id = er.retrieval_run_id
+        ORDER BY er.created_at DESC
+        LIMIT 500
+        """
+    ).fetchall():
+        result_id = str(row["eval_result_id"])
+        if row["run_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_result_missing_run",
+                    f"Eval result {result_id} references missing eval run.",
+                )
+            )
+        if row["case_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_result_missing_case",
+                    f"Eval result {result_id} references missing eval case.",
+                )
+            )
+        if row["retrieval_run_id"] and row["retrieval_exists"] is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "retrieval_eval_result_missing_retrieval_run",
+                    f"Eval result {result_id} references missing retrieval run.",
+                )
+            )
+
+    for row in connection.execute(
+        """
+        SELECT readiness_report_id, retrieval_run_id, verdict, blockers_json,
+               warnings_json, metrics_json
+        FROM answer_readiness_reports
+        ORDER BY created_at DESC
+        LIMIT 200
+        """
+    ).fetchall():
+        report_id = str(row["readiness_report_id"])
+        run_id = str(row["retrieval_run_id"])
+        run = connection.execute(
+            "SELECT retrieval_run_id FROM retrieval_runs WHERE retrieval_run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if run is None:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "readiness_report_missing_retrieval_run",
+                    f"Readiness report {report_id} references missing retrieval run {run_id}.",
+                )
+            )
+        if str(row["verdict"]) not in {"ready", "needs_more_evidence", "not_ready"}:
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "readiness_report_invalid_verdict",
+                    f"Readiness report {report_id} has invalid verdict.",
+                )
+            )
+        for field, code in (
+            ("blockers_json", "readiness_report_invalid_json"),
+            ("warnings_json", "readiness_report_invalid_json"),
+            ("metrics_json", "readiness_report_invalid_json"),
+        ):
+            try:
+                json.loads(str(row[field] or "{}"))
+            except json.JSONDecodeError:
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        code,
+                        f"Readiness report {report_id} has invalid {field}.",
+                    )
+                )
+        blockers = _doctor_json_list(row["blockers_json"])
+        for item in connection.execute(
+            """
+            SELECT retrieval_item_id, quote, chunk_id
+            FROM retrieval_items
+            WHERE retrieval_run_id = ?
+            """,
+            (run_id,),
+        ).fetchall():
+            quote = str(item["quote"] or "")
+            chunk = connection.execute(
+                "SELECT text FROM chunks WHERE chunk_id = ?",
+                (item["chunk_id"],),
+            ).fetchone()
+            if chunk is None:
+                continue
+            if quote.strip() and quote not in str(chunk["text"]):
+                if "quote_not_in_chunk" not in blockers:
+                    findings.append(
+                        DoctorFinding(
+                            "error",
+                            "readiness_report_quote_blocker_missing",
+                            (
+                                f"Readiness report {report_id} should block quote mismatch "
+                                f"for item {item['retrieval_item_id']}."
+                            ),
+                        )
+                    )
+    return findings
+
+
+def _doctor_json_list(raw: object) -> list[str]:
+    try:
+        payload = json.loads(str(raw or "[]"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [str(item) for item in payload]
 
 
 def _split_frontmatter(markdown: str) -> tuple[dict[str, object] | None, str]:

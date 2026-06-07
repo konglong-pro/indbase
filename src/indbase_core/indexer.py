@@ -301,14 +301,20 @@ def _heading_path_text(heading_path_json: str | None) -> str:
 
 
 def _document_tags(connection: sqlite3.Connection, doc_id: str) -> str:
+    from indbase_core.tag_search import TRUSTED_DOCUMENT_TAG_SOURCES
+
+    trusted_sources = ", ".join(f"'{value}'" for value in sorted(TRUSTED_DOCUMENT_TAG_SOURCES))
     rows = connection.execute(
-        """
+        f"""
         SELECT t.name
         FROM document_tags dt
         JOIN tags t ON t.tag_id = dt.tag_id
         WHERE dt.doc_id = ?
           AND dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND dt.source IN ({trusted_sources})
           AND t.deleted_at IS NULL
+          AND t.status = 'active'
         ORDER BY t.name
         """,
         (doc_id,),

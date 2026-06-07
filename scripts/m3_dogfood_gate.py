@@ -118,7 +118,7 @@ def main() -> None:
     write_text("topic-05.csv", "k,v\ndogfood,5")
     write_text("topic-06.json", '{"dogfood":6}')
 
-    run_indb(0, "init", str(vault), "--category-template", "minimal")
+    run_indb(0, "init", str(vault), "--category-template", "indbase_default_v1")
     run_indb(1, "ingest", str(sources), "--vault", str(vault), "--recursive")
 
     assert_search("\u5927\u8bed\u8a00\u6a21\u578b")

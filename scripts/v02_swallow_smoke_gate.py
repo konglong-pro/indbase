@@ -30,7 +30,7 @@ def main() -> None:
     source.parent.mkdir(parents=True)
     source.write_text(TRUSTED_MARKDOWN, encoding="utf-8")
     vault = gate_root / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
     config = load_config(vault_paths(vault).config_path)
     save_config(
         replace(

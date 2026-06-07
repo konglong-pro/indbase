@@ -146,7 +146,7 @@ requires-dist = [
     { name = "swallow", marker = "extra == 'swallow-playwright'", git = "https://github.com/konglong-pro/swallow.git?rev=f0f7fa80c0f7f5959d1d325bb5c3eb9b32082a1d" },
     { name = "typer", specifier = ">=0.15" },
 ]
-provides-extras = ["swallow", "swallow-playwright"]
+provides-extras = ["consoler-agent", "swallow", "swallow-playwright"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3" }]

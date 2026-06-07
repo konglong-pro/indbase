@@ -73,6 +73,9 @@ class FeatureFlags:
     translation: bool = False
     candidate_cards: bool = False
     auto_classification: bool = False
+    category_taxonomy: bool = False
+    tag_governance: bool = False
+    post_ingest_tagging: bool = False
 
 
 @dataclass(frozen=True)
@@ -196,6 +199,9 @@ def load_config(path: Path | str) -> IndbaseConfig:
             translation=bool(features.get("translation", False)),
             candidate_cards=bool(features.get("candidate_cards", False)),
             auto_classification=bool(features.get("auto_classification", False)),
+            category_taxonomy=bool(features.get("category_taxonomy", False)),
+            tag_governance=bool(features.get("tag_governance", False)),
+            post_ingest_tagging=bool(features.get("post_ingest_tagging", False)),
         ),
     )
 
@@ -265,6 +271,9 @@ def _to_toml(config: IndbaseConfig) -> str:
             _bool_line("translation", config.features.translation),
             _bool_line("candidate_cards", config.features.candidate_cards),
             _bool_line("auto_classification", config.features.auto_classification),
+            _bool_line("category_taxonomy", config.features.category_taxonomy),
+            _bool_line("tag_governance", config.features.tag_governance),
+            _bool_line("post_ingest_tagging", config.features.post_ingest_tagging),
             "",
         ]
     )

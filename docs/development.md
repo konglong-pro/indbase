@@ -24,7 +24,7 @@ uv sync --group dev --extra swallow-playwright
 ## First vault
 
 ```powershell
-uv run indb init .\my-vault --category-template minimal
+uv run indb init .\my-vault
 uv run indb ingest .\samples --vault .\my-vault --recursive
 uv run indb search "needle" --vault .\my-vault
 uv run indb doctor --vault .\my-vault
@@ -58,5 +58,7 @@ See [testing.md](testing.md).
 ## Agent / spec workflow
 
 - Operational rules: `AGENTS.md`
-- v0.2 swallow: `docs/planning/v0.2-swallow-ingest-integration.md`, `docs/agents/swallow-ingest-integration/AGENT.md`
-- v0.2 transition: `docs/planning/v0.2-transition-output-integration.md`, `docs/agents/transition-output-integration/AGENT.md`
+- Current scope: `docs/active/current.md`
+- Phase state: `docs/phase-manifest.yaml`
+- Current agent rules: `docs/agents/current/indbase.md`
+- Durable contracts: `docs/contracts/`
