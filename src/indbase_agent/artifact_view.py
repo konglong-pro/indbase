@@ -32,6 +32,8 @@ ARTIFACT_VIEW_TITLES = {
     "indbase.task": "Task",
     "indbase.error": "Error",
     "indbase.doctor_report": "Doctor report",
+    "indbase.provider_run": "Provider run",
+    "indbase.provider_evidence": "Provider evidence",
 }
 
 ARTIFACT_URI_KINDS = {
@@ -41,6 +43,8 @@ ARTIFACT_URI_KINDS = {
     "indbase.task": "tasks",
     "indbase.error": "errors",
     "indbase.doctor_report": "doctor-reports",
+    "indbase.provider_run": "provider_runs",
+    "indbase.provider_evidence": "provider_runs",
 }
 
 SCOPE_SELECTOR_MARKERS = ("*", "?", "[", "]", "{", "}", "<", ">", "|", ";")
@@ -96,6 +100,14 @@ def build_indbase_artifact_view(
                 )
             view = load_doctor_report_view(vault_path)
             blocks = doctor_report_view_blocks(view)
+            truncated = bool(view.get("truncated"))
+        elif kind == "indbase.provider_run":
+            view = load_provider_run_view(vault_path, entity_id, include_evidence=False)
+            blocks = provider_run_view_blocks(view)
+            truncated = bool(view.get("truncated"))
+        elif kind == "indbase.provider_evidence":
+            view = load_provider_run_view(vault_path, entity_id, include_evidence=True)
+            blocks = provider_run_view_blocks(view)
             truncated = bool(view.get("truncated"))
         else:
             raise AgentError(
@@ -348,6 +360,102 @@ def load_doctor_report_view(vault_path: Path) -> dict[str, Any]:
     )
 
 
+def load_provider_run_view(
+    vault_path: Path,
+    provider_run_id: str,
+    *,
+    include_evidence: bool,
+) -> dict[str, Any]:
+    connection = _connect_ro(vault_path)
+    try:
+        row = connection.execute(
+            """
+            SELECT provider_run_id, operation_id, action_id, task_id, ingest_run_id,
+                   converter_run_id, output_run_id, provider_id, provider_package,
+                   provider_version, capability_id, capability_contract_version,
+                   transport_profile, provider_job_id, provider_status, evidence_status,
+                   started_at, finished_at, input_sha256, manifest_artifact_ref_json,
+                   trace_artifact_ref_json, evidence_root, warning_count, error_count,
+                   primary_error_code, provider_error_code, provider_error_json,
+                   metadata_json, created_at, updated_at
+            FROM provider_runs
+            WHERE provider_run_id = ?
+            """,
+            (provider_run_id,),
+        ).fetchone()
+        if row is None:
+            raise AgentError(
+                "artifact_not_found",
+                f"Provider run not found: {provider_run_id}",
+                details={"provider_run_id": provider_run_id},
+            )
+        errors = connection.execute(
+            """
+            SELECT error_id, component, error_type, severity, message, created_at
+            FROM errors
+            WHERE provider_run_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            (provider_run_id,),
+        ).fetchall()
+        reviews = connection.execute(
+            """
+            SELECT review_id, type, target_type, target_id, status, reason, created_at
+            FROM review_items
+            WHERE provider_run_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            (provider_run_id,),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    provider_run = _row_dict(row)
+    evidence_summary: dict[str, Any] | None = None
+    truncated = False
+    if include_evidence:
+        evidence_summary, truncated = _provider_evidence_summary(vault_path, provider_run)
+    return _with_view_envelope(
+        {
+            "vault_path": vault_path.as_posix(),
+            "provider_run": provider_run,
+            "provider_errors": [_row_dict(item) for item in errors],
+            "provider_review_items": [_row_dict(item) for item in reviews],
+            "evidence_summary": evidence_summary,
+        },
+        limits={"provider_related_rows": 20},
+        truncated=truncated,
+    )
+
+
+def provider_run_view_blocks(view: dict[str, Any]) -> list[dict[str, Any]]:
+    run = view["provider_run"]
+    evidence = view.get("evidence_summary")
+    blocks = [
+        markdown_block(
+            f"# Provider run `{run['provider_run_id']}`\n\n"
+            f"Provider: **{run.get('provider_id') or ''}**\n\n"
+            f"Capability: `{run.get('capability_id') or ''}`\n\n"
+            f"Status: **{run.get('provider_status') or 'pending'}**",
+            title="Provider run",
+        ),
+        table_block(["field", "value"], _field_rows(run), title="Provider run fields"),
+    ]
+    if evidence:
+        files = evidence.get("files") if isinstance(evidence, dict) else []
+        blocks.append(
+            table_block(
+                ["name", "size_bytes"],
+                [[item.get("name", ""), item.get("size_bytes", "")] for item in files if isinstance(item, dict)],
+                title="Copied evidence files",
+            )
+        )
+    blocks.append(json_block(view, title="Provider run JSON"))
+    return blocks
+
+
 def document_view_blocks(view: dict[str, Any]) -> list[dict[str, Any]]:
     document = view["document"]
     revision = view.get("current_revision")
@@ -551,11 +659,12 @@ def _parse_artifact_ref(artifact_uri: str, kind: str) -> tuple[str, str]:
 
     raw_parts = [part for part in parsed.path.split("/") if part]
     if len(raw_parts) != 1:
-        raise AgentError(
-            "invalid_artifact_uri",
-            f"Artifact URI must identify exactly one object: {artifact_uri}",
-            details={"artifact_uri": artifact_uri},
-        )
+        if kind != "indbase.provider_evidence" or len(raw_parts) != 2 or raw_parts[1] != "evidence":
+            raise AgentError(
+                "invalid_artifact_uri",
+                f"Artifact URI must identify exactly one object: {artifact_uri}",
+                details={"artifact_uri": artifact_uri},
+            )
     raw_id = raw_parts[0]
     entity_id = unquote(raw_id)
     if not entity_id or _looks_like_scope_selector(entity_id, raw_id):
@@ -780,6 +889,50 @@ def _truncate_error_fields(error_payload: dict[str, Any]) -> bool:
             error_payload[f"{field}_truncated"] = shortened
             truncated = truncated or shortened
     return truncated
+
+
+def _provider_evidence_summary(vault_path: Path, provider_run: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    evidence_root = str(provider_run.get("evidence_root") or "")
+    root = vault_path / evidence_root
+    if not evidence_root or not root.is_dir():
+        return {"evidence_root": evidence_root, "files": [], "missing": True}, False
+    files: list[dict[str, Any]] = []
+    truncated = False
+    for index, path in enumerate(sorted(child for child in root.rglob("*") if child.is_file())):
+        if index >= 50:
+            truncated = True
+            break
+        files.append(
+            {
+                "name": path.relative_to(root).as_posix(),
+                "size_bytes": path.stat().st_size,
+            }
+        )
+    evidence_index = _provider_evidence_index_summary(root / "evidence_index.json")
+    return {
+        "evidence_root": evidence_root,
+        "files": files,
+        "evidence_index": evidence_index,
+    }, truncated
+
+
+def _provider_evidence_index_summary(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"parse_error": "invalid_json"}
+    if not isinstance(payload, dict):
+        return {"parse_error": "not_object"}
+    artifacts = payload.get("artifacts")
+    return {
+        "provider_run_id": payload.get("provider_run_id"),
+        "provider": payload.get("provider"),
+        "artifact_count": len(artifacts) if isinstance(artifacts, list) else 0,
+        "manifest": payload.get("manifest"),
+        "trace": payload.get("trace"),
+    }
 
 
 def _source_preview(vault_path: Path, revision: dict[str, Any] | None) -> dict[str, Any]:

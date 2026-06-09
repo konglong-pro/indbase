@@ -1,6 +1,6 @@
 # Testing and Release Verification
 
-**As of:** 2026-06-06
+**As of:** 2026-06-09
 
 This document is the **canonical summary of what is tested and what must pass** for day-to-day development and release. For delivery scope see [project-status.md](project-status.md). For historical v0.2 gate policy see [planning/archive/v0.2/release-gate-checkpoint.md](planning/archive/v0.2/release-gate-checkpoint.md).
 
@@ -52,6 +52,13 @@ uv run python -m pytest tests/test_v0323f_indbase_nl_v2_coordination.py -q
 uv run python -m pytest tests/test_retrieval_evaluation.py -q
 uv run python scripts/v033_retrieval_eval_release_gate.py
 
+# v0.3.4 provider evidence / trust correlation
+uv run python scripts/check_docs.py
+uv run python -m pytest tests/test_provider_contracts.py tests/test_provider_runs.py -q
+uv run python scripts/provider_fake_release_gate.py
+$env:INDBASE_PROVIDER_SMOKE_REQUIRED='1'  # formal release only
+uv run python scripts/provider_real_smoke.py
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -61,7 +68,8 @@ uv run python scripts/v02_release_gate.py
 Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 
 The `test` job also runs `uv run python scripts/check_docs.py` to enforce the
-documentation lifecycle gate.
+documentation lifecycle gate. The `provider-v034` job runs the v0.3.4 provider
+fake release gate.
 
 | Check name | Layer | Command |
 | --- | --- | --- |
@@ -75,6 +83,7 @@ documentation lifecycle gate.
 | C2d — v0.3.2.2 tag/search governance gate | v0.3.2.2 | `scripts/v0322_tag_search_governance_release_gate.py` |
 | C2e - v0.3.2.3 consoler coordination gates | v0.3.2.3c/3d/3f | `tests/test_v0323c_indbase_coordination.py`, `tests/test_v0323d_indbase_intent_coordination.py`, `tests/test_v0323f_indbase_nl_v2_coordination.py` |
 | C4 - v0.3.3 retrieval eval/readiness gate | v0.3.3 | `scripts/v033_retrieval_eval_release_gate.py` |
+| C5 - v0.3.4 provider fake gate | v0.3.4 | `scripts/provider_fake_release_gate.py` |
 | retired template guard | guard | no `minimal` template in `scripts/`, `README.md`, `docs/development.md` |
 
 Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/workflows/release-dogfood.yml) — manual or weekly; uses `tests/fixtures/v02_dogfood_corpus/` or repo variable `INDB_REAL_CORPUS`.
@@ -83,7 +92,8 @@ Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/
 
 ## Pytest suite (layer A)
 
-**Total:** 348 tests collected in `tests/` (`uv run python -m pytest --collect-only`; environment-gated smoke tests skip unless their prerequisites are enabled).
+**Closeout run:** 362 passed and 1 skipped in `tests/` on 2026-06-09.
+Environment-gated smoke tests skip unless their prerequisites are enabled.
 
 Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["tests"]`, `pythonpath = ["src"]`).
 
@@ -175,6 +185,9 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `v0323a_probe_stabilization_release_gate.py` | v0.3.2.3a | Deterministic consoler Source Trust probe: ingest -> search hit -> document artifact/view, environment checks |
 | `v0323b_consoler_readonly_views_release_gate.py` | v0.3.2.3b | Isolated read-only view gate: document/review/task/error/doctor artifact views, metadata, budgets, stable URI errors, doctor read-only |
 | `v033_retrieval_eval_release_gate.py` | v0.3.3 | Deterministic eval fixture import/run, answer readiness verdict coverage, no citations writes, doctor hard = 0 |
+| `provider_contract_gate.py` | v0.3.4 | Provider contract compile and focused contract tests |
+| `provider_fake_release_gate.py` | v0.3.4 C | Provider contracts, fake ingest/output behavior, evidence copy, provider runs, output trust, and provider artifact views |
+| `provider_real_smoke.py` | v0.3.4 D | Environment-gated real provider smoke; missing runtime is explicit skip by default and fail when `INDBASE_PROVIDER_SMOKE_REQUIRED=1` |
 
 Shared helpers: `scripts/gate_common.py`.
 
@@ -191,6 +204,12 @@ mvp_release_gate.py         # MVP aggregate
 v01_release_candidate_gate.py
 doctor_negative_gate.py     # REPLACED for v0.2 (same filename, new behavior)
 ```
+
+`m6_pdf_ingest_gate.py` and `m63_pdf_ocr_hardening_gate.py` are retained as
+historical PDF/OCR guards. In the provider era they validate that legacy PDF
+direct conversion is visibly retired as `legacy_conversion_retired` and does
+not create revisions or default-searchable chunks. Real PDF provider success is
+covered by environment-gated provider smoke, not by these historical gates.
 
 ## Opt-in local smoke
 
@@ -228,11 +247,12 @@ files are not default reading; start from `docs/project-status.md` or
 | v0.3.2.3d | [archive/v0.3.2.3d-closeout.md](testing/archive/v0.3.2.3d-closeout.md) | Deterministic intent drafting coordination |
 | v0.3.2.3e | [archive/v0.3.2.3e-closeout.md](testing/archive/v0.3.2.3e-closeout.md) | Real dogfood friction pass |
 | v0.3.2.3f | [archive/v0.3.2.3f-closeout.md](testing/archive/v0.3.2.3f-closeout.md) | Opt-in assisted NL v2 coordination |
+| v0.3.4 | [archive/v0.3.4-provider-evidence-trust-correlation-closeout.md](testing/archive/v0.3.4-provider-evidence-trust-correlation-closeout.md) | Provider evidence / trust correlation |
 
 ## What passing means (release bar)
 
 ```text
-348 collected
+362 passed, 1 skipped
 compileall clean
 v02 deterministic gate passed
 doctor negative gate passed
@@ -247,6 +267,7 @@ v0323d indbase intent coordination contract passed (when coordinating consoler v
 v0323e consoler V4f friction gate passed in E:\consoler (when coordinating consoler v4f)
 v0323f indbase NL v2 coordination contract passed (when coordinating consoler v4g)
 v033 retrieval eval/readiness gate passed (when touching retrieval evaluation)
+v034 provider fake gate passed
 GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1/v0.3.2.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```

@@ -2,10 +2,10 @@
 doc_type: phase_plan
 phase_id: v0.3.3
 title: Retrieval Evaluation / Answer Readiness
-status: active
+status: completed
 owner: indbase
 canonical: true
-read_by_default: true
+read_by_default: false
 supersedes:
   - docs/planning/v0.3.3-retrieval-evaluation-answer-readiness.md
 superseded_by: null
@@ -23,7 +23,7 @@ release_gate: scripts/v033_retrieval_eval_release_gate.py
 
 # v0.3.3 Retrieval Evaluation / Answer Readiness
 
-Status: active design
+Status: archived baseline
 
 Date: 2026-05-21
 
@@ -31,11 +31,11 @@ Phase: v0.3.3 deterministic retrieval evaluation and ask-readiness foundation
 
 Related docs:
 
-- [MVP v0.1 Spec](../archive/v0.1/mvp-v0.1-spec.plan.md)
-- [v0.3.1 Taxonomy Foundation](../superseded/v0.3.1-taxonomy-foundation.md)
-- [v0.3.2 Retrieval Intelligence Foundation](../archive/v0.3.2-retrieval-intelligence/retrieval-intelligence-foundation.plan.md)
-- [v0.3.2 Retrieval Dogfood Report](../../testing/archive/v0.3.2-retrieval-dogfood-report.md)
-- [v0.3.3 Retrieval Evaluation / Answer Readiness Agent Guide](../../agents/current/indbase.md)
+- [MVP v0.1 Spec](../v0.1/mvp-v0.1-spec.plan.md)
+- [v0.3.1 Taxonomy Foundation](../../superseded/v0.3.1-taxonomy-foundation.md)
+- [v0.3.2 Retrieval Intelligence Foundation](../v0.3.2-retrieval-intelligence/retrieval-intelligence-foundation.plan.md)
+- [v0.3.2 Retrieval Dogfood Report](../../../testing/archive/v0.3.2-retrieval-dogfood-report.md)
+- [v0.3.3 Retrieval Evaluation / Answer Readiness Agent Guide](../../../agents/archive/indbase/v0.3.3-retrieval-evaluation-answer-readiness.md)
 
 ## Decision Summary
 

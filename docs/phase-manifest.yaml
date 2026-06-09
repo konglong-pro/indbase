@@ -1,41 +1,67 @@
 version: 1
-last_updated: 2026-06-07
+last_updated: 2026-06-09
 
 current:
   indbase:
-    phase_id: v0.3.3
-    title: Retrieval Evaluation / Answer Readiness
-    status: active
+    phase_id: v0.3.4
+    title: Provider Evidence / Trust Correlation
+    status: completed
     owner: indbase
-    canonical_spec: docs/planning/active/v0.3.3-retrieval-evaluation-answer-readiness.md
+    canonical_spec: docs/planning/archive/v0.3.4/provider-evidence-trust-correlation.plan.md
     agent_rules: docs/agents/current/indbase.md
-    release_gate: scripts/v033_retrieval_eval_release_gate.py
+    release_gate: scripts/provider_fake_release_gate.py
     status_summary: docs/project-status.md
     related_contracts:
+      - docs/contracts/provider-capability-contract.md
+      - docs/contracts/trust-boundary.md
+      - docs/contracts/artifact-contract.md
+      - docs/contracts/consoler-agent-boundary.md
       - docs/contracts/revision-contract.md
       - docs/contracts/source-search-contract.md
-      - docs/contracts/search-json-contract.md
-      - docs/contracts/retrieval-evaluation-contract.md
     allowed_areas:
-      - retrieval_evaluation
-      - answer_readiness_reports
-      - eval_jsonl_fixtures
-      - doctor_eval_integrity_checks
+      - provider_capability_contracts
+      - provider_bindings
+      - fake_provider_tests
+      - swallow_adapter_boundary
+      - transition_adapter_boundary
+      - evidence_packages
+      - evidence_store
+      - provider_runs
+      - provider_error_mapping
+      - provider_doctor_sections
+      - agent_operation_trace_metadata
+      - provider_evidence_artifact_views
+      - search_pollution_tests
       - docs_lifecycle
     forbidden_areas:
       - ask
       - generated_answers
       - citations_writes
       - llm_judges
-      - provider_calls
+      - provider_cache_as_truth
+      - provider_uri_artifact_blocks
+      - direct_agent_provider_calls
+      - direct_core_provider_backend_imports
+      - default_http_provider_profiles
+      - default_mcp_provider_profiles
+      - provider_backend_user_options
       - retrieval_ranking_rewrite
       - taxonomy_mutation
-      - source_revision_mutation
+      - source_revision_mutation_outside_promotion
+      - vault_browser
     related_external:
+      swallow:
+        phase_id: capability-provider-p1
+        status: referenced
+        canonical_spec: E:\swallow\docs\capability-provider-p1.md
+      transition:
+        phase_id: capability-provider
+        status: referenced
+        canonical_spec: E:\transition\docs\contracts\capability-provider.md
       consoler:
-        phase_id: v4g
-        status: completed
-        canonical_spec: E:\consoler\docs\planning\v4g-indbase-nl-v2-intent-drafting.md
+        phase_id: v5a
+        status: referenced
+        canonical_spec: E:\consoler\docs\planning\active\v5a-operation-trace-artifact-vocabulary.md
 
 phases:
   v0.1:
@@ -155,10 +181,20 @@ phases:
     closeout: docs/testing/archive/v0.3.2.3f-closeout.md
 
   v0.3.3:
-    status: active
-    canonical_spec: docs/planning/active/v0.3.3-retrieval-evaluation-answer-readiness.md
-    agent_rules: docs/agents/current/indbase.md
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.3/retrieval-evaluation-answer-readiness.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.3-retrieval-evaluation-answer-readiness.md
     release_gate: scripts/v033_retrieval_eval_release_gate.py
+
+  v0.3.4:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.4/provider-evidence-trust-correlation.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.4-provider-evidence-trust-correlation.md
+    release_gate: scripts/provider_fake_release_gate.py
+    closeout: docs/testing/archive/v0.3.4-provider-evidence-trust-correlation-closeout.md
+    evidence:
+      - docs/contracts/provider-capability-contract.md
+      - capability-bindings.yaml
 
 superseded:
   v0.1-direct-normalizer-rules:

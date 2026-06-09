@@ -312,6 +312,7 @@ def run_m2_ingest_pipeline(
                 "converted_items": len(conversion_result.converted_items),
                 "skipped_items": conversion_result.skipped_items,
                 "failed_items": conversion_result.failed_items,
+                "provider_runs": _provider_runs_for_task(connection, task_id),
             },
         )
         revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
@@ -428,6 +429,7 @@ def run_m3_ingest_pipeline(
                 "converted_items": len(conversion_result.converted_items),
                 "skipped_items": conversion_result.skipped_items,
                 "failed_items": conversion_result.failed_items,
+                "provider_runs": _provider_runs_for_task(connection, task_id),
             },
         )
         _invoke_checkpoint(checkpoint, "revision")
@@ -592,6 +594,7 @@ def run_m3_url_ingest_pipeline(
                 "converted_items": len(conversion_result.converted_items),
                 "skipped_items": conversion_result.skipped_items,
                 "failed_items": conversion_result.failed_items,
+                "provider_runs": _provider_runs_for_task(connection, task_id),
             },
         )
         revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
@@ -2279,6 +2282,37 @@ def _ingest_successful_items_are_searchable(connection: sqlite3.Connection, inge
         (ingest_id,),
     ).fetchone()
     return int(succeeded["count"] or 0) > 0 and int(row["count"] or 0) == 0
+
+
+def _provider_runs_for_task(connection: sqlite3.Connection, task_id: str) -> list[dict[str, object]]:
+    try:
+        rows = connection.execute(
+            """
+            SELECT provider_run_id, operation_id, provider_id, provider_version,
+                   capability_id, transport_profile, provider_job_id,
+                   provider_status, evidence_status
+            FROM provider_runs
+            WHERE task_id = ?
+            ORDER BY created_at, provider_run_id
+            """,
+            (task_id,),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [
+        {
+            "provider_run_id": row["provider_run_id"],
+            "operation_id": row["operation_id"],
+            "provider_id": row["provider_id"],
+            "provider_version": row["provider_version"],
+            "capability_id": row["capability_id"],
+            "profile": row["transport_profile"],
+            "provider_job_id": row["provider_job_id"],
+            "provider_status": row["provider_status"],
+            "evidence_copied": row["evidence_status"] == "copied",
+        }
+        for row in rows
+    ]
 
 
 def _run_post_ingest_category_taxonomy(

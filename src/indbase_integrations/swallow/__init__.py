@@ -1,0 +1,1 @@
+"""Swallow provider adapter package."""

@@ -142,7 +142,12 @@ class IndbaseAgentAdapter(AgentAdapter):
     ) -> dict[str, Any]:
         self.validate(command, args)
         if command == "indbase.doctor":
-            return self._execute_doctor(args, emitter=emitter, cancel_flag=cancel_flag)
+            return self._execute_doctor(
+                args,
+                action_id=action_id,
+                emitter=emitter,
+                cancel_flag=cancel_flag,
+            )
         if command == "indbase.ingest_file":
             return self._execute_ingest(
                 args,
@@ -151,7 +156,13 @@ class IndbaseAgentAdapter(AgentAdapter):
                 cancel_flag=cancel_flag,
                 interaction=interaction,
             )
-        return self._execute_readonly_command(command, args, emitter=emitter, cancel_flag=cancel_flag)
+        return self._execute_readonly_command(
+            command,
+            args,
+            action_id=action_id,
+            emitter=emitter,
+            cancel_flag=cancel_flag,
+        )
 
     def get_artifact_view(
         self,
@@ -353,6 +364,7 @@ class IndbaseAgentAdapter(AgentAdapter):
         self,
         args: dict[str, Any],
         *,
+        action_id: str,
         emitter,
         cancel_flag,
     ) -> dict[str, Any]:
@@ -383,7 +395,7 @@ class IndbaseAgentAdapter(AgentAdapter):
                 title="Doctor report",
             )
         )
-        return {"blocks": blocks}
+        return {"blocks": blocks, "operation_trace": self._operation_trace("indbase.doctor", action_id=action_id)}
 
     def _execute_ingest(
         self,
@@ -422,7 +434,11 @@ class IndbaseAgentAdapter(AgentAdapter):
                         probe,
                         vault_path.as_posix(),
                         source_path.as_posix(),
-                    )
+                    ),
+                    "operation_trace": self._operation_trace(
+                        "indbase.ingest_file",
+                        action_id=action_id,
+                    ),
                 }
             if choice != "continue":
                 raise AgentError(
@@ -455,13 +471,23 @@ class IndbaseAgentAdapter(AgentAdapter):
             before_snapshot=before_snapshot,
             after_snapshot=after_snapshot,
         )
-        return {"blocks": blocks}
+        return {
+            "blocks": blocks,
+            "operation_trace": self._operation_trace(
+                "indbase.ingest_file",
+                action_id=action_id,
+                vault_path=vault_path,
+                task_id=result.task_id,
+                ingest_id=result.ingest_id,
+            ),
+        }
 
     def _execute_readonly_command(
         self,
         command: str,
         args: dict[str, Any],
         *,
+        action_id: str,
         emitter,
         cancel_flag,
     ) -> dict[str, Any]:
@@ -477,7 +503,14 @@ class IndbaseAgentAdapter(AgentAdapter):
 
         blocks = steps.run("read-vault", "Read vault state", run_read)
         progress.update(0.95, "Rendered result")
-        return {"blocks": blocks}
+        return {
+            "blocks": blocks,
+            "operation_trace": self._operation_trace(
+                command,
+                action_id=action_id,
+                vault_path=Path(str(args["vault_path"])).expanduser(),
+            ),
+        }
 
     def _readonly_blocks(self, command: str, args: dict[str, Any]) -> list[dict[str, Any]]:
         vault_path = Path(str(args["vault_path"])).expanduser()
@@ -935,6 +968,61 @@ class IndbaseAgentAdapter(AgentAdapter):
                 )
             )
         return blocks
+
+    def _operation_trace(
+        self,
+        command: str,
+        *,
+        action_id: str | None,
+        vault_path: Path | None = None,
+        task_id: str | None = None,
+        ingest_id: str | None = None,
+    ) -> dict[str, Any]:
+        trace: dict[str, Any] = {
+            "command": command,
+            "action_id": action_id,
+            "task_id": task_id,
+            "ingest_id": ingest_id,
+            "provider_runs": [],
+        }
+        if vault_path is None or task_id is None:
+            return trace
+        try:
+            with _connect_readonly(vault_path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT provider_run_id, operation_id, provider_id, provider_version,
+                           capability_id, transport_profile, provider_job_id,
+                           provider_status, evidence_status
+                    FROM provider_runs
+                    WHERE task_id = ?
+                    ORDER BY created_at, provider_run_id
+                    """,
+                    (task_id,),
+                ).fetchall()
+        except Exception:
+            return trace
+        trace["provider_runs"] = [
+            {
+                "provider_run_id": row["provider_run_id"],
+                "operation_id": row["operation_id"],
+                "provider": {
+                    "provider_id": row["provider_id"],
+                    "provider_version": row["provider_version"],
+                    "capability_id": row["capability_id"],
+                    "profile": row["transport_profile"],
+                    "provider_job_id": row["provider_job_id"],
+                    "provider_status": row["provider_status"],
+                    "evidence_copied": row["evidence_status"] == "copied",
+                },
+                "artifacts": {
+                    "provider_run": f"indbase://provider_runs/{row['provider_run_id']}",
+                    "evidence": f"indbase://provider_runs/{row['provider_run_id']}/evidence",
+                },
+            }
+            for row in rows
+        ]
+        return trace
 
     def _bounded_int(self, value: object, *, name: str, minimum: int, maximum: int) -> int:
         if isinstance(value, bool):

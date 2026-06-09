@@ -1,75 +1,35 @@
+---
+doc_type: agent_rules
+status: completed
+read_by_default: true
+---
+
 # Current Indbase Agent Rules
 
-Read this after `docs/active/current.md` when the current task touches
-indbase implementation or documentation.
+There is no active indbase implementation phase after the v0.3.4 closeout.
 
-## Current Phase
+Use this file as a routing note only. The latest completed provider-evidence
+rules are archived at
+`docs/agents/archive/indbase/v0.3.4-provider-evidence-trust-correlation.md`.
 
-- Phase: `v0.3.3`
-- Title: Retrieval Evaluation / Answer Readiness
-- Canonical spec:
-  `docs/planning/active/v0.3.3-retrieval-evaluation-answer-readiness.md`
-- Gate: `uv run python scripts/v033_retrieval_eval_release_gate.py`
+## Default Routing
 
-## Mission
+- Start from `docs/phase-manifest.yaml` and `docs/active/current.md`.
+- Use `docs/project-status.md` for shipped and completed behavior.
+- Use `docs/contracts/` for durable trust, artifact, revision, source search,
+  provider capability, and consoler boundary rules.
+- Do not implement archived, superseded, or future phase work unless the user
+  explicitly asks for it.
 
-Make retrieval quality measurable and determine whether a persisted retrieval
-run is ready enough for a future answer workflow. Do not implement answer
-generation.
-
-Short form:
-
-```text
-Retrieve builds packages.
-Eval measures packages.
-Readiness judges package safety.
-Ask remains out of scope.
-```
-
-## Allowed Work
-
-- Evaluation case schema, import, export, runs, and result records.
-- Answer readiness reports and deterministic readiness policy.
-- JSONL fixtures under `tests/fixtures/v033_retrieval_eval/`.
-- CLI commands under `indb eval retrieval`.
-- Doctor checks for eval/readiness integrity.
-- Focused docs that update lifecycle state, status, or gates.
-
-Use `docs/contracts/retrieval-evaluation-contract.md` for durable eval and
-answer-readiness rules.
-
-## Do Not Add
-
-- `indb ask`, answer drafts, summaries, claims, cards, or notes.
-- Writes to `citations`.
-- LLM judges, providers, hidden network calls, or fake-provider dependency for
-  main v0.3.3 behavior.
-- Retrieval ranking rewrites, MMR, semantic dedupe, or taxonomy boosts.
-- Source Markdown, document revisions, chunks, originals, output artifacts,
-  taxonomy tables, profiles, or feature atom mutation through eval itself.
-- TUI/Web UI flows unless a later active doc explicitly allows them.
-
-## Validation
-
-Documentation-only changes:
+## Baseline Validation
 
 ```powershell
 uv run python scripts/check_docs.py
-git diff --check
+uv run python scripts/provider_fake_release_gate.py
 ```
 
-v0.3.3 implementation changes:
+Real provider smoke remains environment-gated:
 
 ```powershell
-uv run python -m pytest tests/test_retrieval_evaluation.py -q
-uv run python scripts/v033_retrieval_eval_release_gate.py
-uv run python -m compileall -q src tests scripts
+uv run python scripts/provider_real_smoke.py
 ```
-
-Shared retrieval/search/doctor/database changes may require the broader suite
-listed in `docs/testing.md`.
-
-## Completion Report
-
-Report changed files, schema or CLI surfaces touched, fixture cases added,
-readiness policy version, tests run, tests not run, and remaining risks.

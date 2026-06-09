@@ -52,14 +52,15 @@ historical evidence under archive folders.
 
 Read `docs/active/current.md` first.
 
-Current indbase phase:
+Current indbase phase state:
 
-- phase id: `v0.3.3`
-- title: Retrieval Evaluation / Answer Readiness
-- canonical spec:
-  `docs/planning/active/v0.3.3-retrieval-evaluation-answer-readiness.md`
+- phase id: `v0.3.4`
+- title: Provider Evidence / Trust Correlation
+- status: completed
+- canonical spec and closeout: resolve through `docs/phase-manifest.yaml`
 - agent rules: `docs/agents/current/indbase.md`
-- release gate: `uv run python scripts/v033_retrieval_eval_release_gate.py`
+- current documentation gate: `uv run python scripts/check_docs.py`
+- provider baseline gate: `uv run python scripts/provider_fake_release_gate.py`
 
 Completed compatibility note: `v0.3.2.3f-indbase-nl-v2-intent-drafting` is
 closed out in this repo. Its consoler execution brief was
@@ -93,20 +94,21 @@ Focused gates:
 ```powershell
 uv run python scripts/v02_deterministic_release_gate.py
 uv run python scripts/doctor_negative_gate.py
-uv run python scripts/v033_retrieval_eval_release_gate.py
+uv run python scripts/check_docs.py
 ```
 
 Use `docs/testing.md` for phase-specific gates before touching taxonomy, tag
-governance, governed search, retrieval evaluation, or `indbase_agent`.
+governance, governed search, retrieval evaluation, provider integration, or
+`indbase_agent`.
 
 ## Task Routing
 
 - Core data, revisions, chunks, ingest, output, search, doctor: read
   `docs/contracts/` and `docs/architecture.md`, then inspect
   `src/indbase_core/`.
-- Current v0.3.3 retrieval evaluation work: read `docs/active/current.md`,
-  `docs/planning/active/v0.3.3-retrieval-evaluation-answer-readiness.md`, and
-  `docs/agents/current/indbase.md`.
+- Provider evidence archaeology or regression repair: read `docs/active/current.md`,
+  `docs/project-status.md`, `docs/phase-manifest.yaml`, and
+  `docs/contracts/provider-capability-contract.md`.
 - Consoler adapter work: read `docs/contracts/consoler-agent-boundary.md` and
   `docs/contracts/artifact-contract.md`, then inspect `src/indbase_agent/`.
 - Documentation lifecycle work: read `docs/phase-manifest.yaml`,
@@ -125,10 +127,16 @@ only safe interface-preserving work.
 - Do not physically delete revisions or chunks in normal workflows.
 - Candidate conversion output is not a trusted source revision.
 - Export artifacts are not source revisions.
+- Provider output is evidence or a candidate; indbase alone decides trusted
+  state.
+- Provider cache is disposable; copied indbase artifact evidence is durable.
+- `indbase_agent` must not call provider backends directly.
+- Consoler artifact blocks must use `indbase://...`, not provider URIs or
+  provider cache paths.
 - Default source search indexes promoted current source revisions only.
 - Do not write normal search snippets to `citations`.
 - Do not add LLM calls, `ask`, generated answers, embeddings, or provider
-  behavior unless the active scope explicitly allows it.
+  behavior outside approved provider contracts.
 - All durable operations must be traceable.
 - All failures must be visible through tasks, task events, errors, review
   items, or explicit command output as appropriate.

@@ -30,6 +30,7 @@ def archive_partial_evidence(
     *,
     response: BridgeResponse | None = None,
     job_dir: Path | None = None,
+    provider_run_id: str | None = None,
 ) -> ArchivedEvidence | None:
     """Archive durable evidence for failed runs when bridge output is partial."""
     if response is not None and (
@@ -44,6 +45,7 @@ def archive_partial_evidence(
             response,
             transition_config=transition_config,
             input_markdown=input_markdown,
+            provider_run_id=provider_run_id,
         )
     if job_dir is not None:
         from indbase_core.transition_adapter import evidence_paths_from_job_dir
@@ -67,6 +69,7 @@ def archive_partial_evidence(
             synthetic,
             transition_config=transition_config,
             input_markdown=input_markdown,
+            provider_run_id=provider_run_id,
         )
     return None
 
@@ -78,8 +81,13 @@ def archive_transition_evidence(
     *,
     transition_config: dict[str, object],
     input_markdown: str,
+    provider_run_id: str | None = None,
 ) -> ArchivedEvidence:
-    evidence_dir = paths.output_run_evidence_dir(output_run_id)
+    evidence_dir = (
+        paths.provider_run_evidence_dir(provider_run_id)
+        if provider_run_id
+        else paths.output_run_evidence_dir(output_run_id)
+    )
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
     manifest_rel = _copy_evidence_file(
@@ -110,6 +118,8 @@ def archive_transition_evidence(
     }
     input_hashes_dest.write_text(json.dumps(input_payload, indent=2) + "\n", encoding="utf-8")
     input_hashes_rel = paths.relative_to_vault(input_hashes_dest)
+    if provider_run_id:
+        _mirror_output_run_evidence(paths, output_run_id, evidence_dir)
 
     return ArchivedEvidence(
         manifest_path=manifest_rel,
@@ -132,3 +142,18 @@ def _copy_evidence_file(paths: VaultPaths, source: str | None, destination: Path
             return None
     shutil.copy2(source_path, destination)
     return paths.relative_to_vault(destination)
+
+
+def _mirror_output_run_evidence(paths: VaultPaths, output_run_id: str, evidence_dir: Path) -> None:
+    mirror_dir = paths.output_run_evidence_dir(output_run_id)
+    mirror_dir.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "transition_manifest.json",
+        "transition_trace.jsonl",
+        "transition_report.json",
+        "config.json",
+        "input_hashes.json",
+    ):
+        source = evidence_dir / name
+        if source.is_file():
+            shutil.copy2(source, mirror_dir / name)

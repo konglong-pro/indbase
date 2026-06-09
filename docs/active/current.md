@@ -1,88 +1,126 @@
 # Current Active Work
 
-Last updated: 2026-06-07
+Last updated: 2026-06-09
 
-Source of current phase: `docs/phase-manifest.yaml`
+Source of current phase state: `docs/phase-manifest.yaml`
 
 ## Current State
 
-`indbase` is a local-first knowledge substrate. The vault is the system of
-record for originals, immutable source revisions, chunks, indexes,
-observability records, and durable artifacts.
+There is no active indbase implementation phase after the v0.3.4 closeout.
+
+Latest completed baseline:
+
+- `v0.3.4` Provider Evidence / Trust Correlation.
 
 Shipped or frozen:
 
 - v0.1 Foundation MVP is frozen.
-- v0.2 swallow-backed ingest is shipped.
-- v0.2 transition-backed output is shipped.
+- v0.2 swallow-backed ingest and transition-backed output are shipped
+  historical baselines.
 - v0.3.1 category taxonomy foundation is shipped.
 - v0.3.2 tag governance, v0.3.2.1 tag harness, and v0.3.2.2 governed
   tag/source search are shipped.
 - v0.3.2.3a through v0.3.2.3f consoler coordination phases are completed.
-
-Active:
-
-- `v0.3.3` Retrieval Evaluation / Answer Readiness.
+- v0.3.3 Retrieval Evaluation / Answer Readiness is completed.
+- v0.3.4 Provider Evidence / Trust Correlation is completed.
 
 Next but not approved:
 
 - Future `ask` and answer generation work remains out of scope until a later
   active phase explicitly approves it.
 
-## Required Reading For Current Work
+## Latest Completed Scope
 
-- `docs/phase-manifest.yaml`
-- `docs/planning/active/v0.3.3-retrieval-evaluation-answer-readiness.md`
-- `docs/agents/current/indbase.md`
-- `docs/contracts/revision-contract.md`
-- `docs/contracts/source-search-contract.md`
-- `docs/contracts/search-json-contract.md`
-- `docs/contracts/retrieval-evaluation-contract.md`
-- `docs/contracts/trust-boundary.md`
-- `docs/testing.md`
+v0.3.4 makes indbase consume packaged providers as evidence producers while
+remaining the trust boundary and vault state owner.
 
-Read archived or completed phase docs only when the task explicitly asks for
-phase archaeology.
-
-## Current Goal
-
-`v0.3.3` makes retrieval quality measurable and adds deterministic answer
-readiness reports. It prepares a future `ask` input contract without generating
-answers.
-
-The current product chain is:
+The frozen provider trust chain is:
 
 ```text
-retrieve -> persisted retrieval_run_id -> readiness report -> future ask
+indbase command
+-> indbase service
+-> provider capability
+-> evidence package
+-> indbase evidence copy
+-> promotion/output policy
+-> trusted state or visible review/error
 ```
 
-## Current Gates
+The trust rule is:
+
+```text
+provider output = evidence or candidate
+indbase decision = trusted state
+```
+
+## Required Reading
+
+For new work:
+
+- `docs/phase-manifest.yaml`
+- `docs/project-status.md`
+- `docs/testing.md`
+- `docs/contracts/`
+- `docs/agents/current/indbase.md`
+
+For v0.3.4 archaeology or regression repair:
+
+- `docs/planning/archive/v0.3.4/provider-evidence-trust-correlation.plan.md`
+- `docs/agents/archive/indbase/v0.3.4-provider-evidence-trust-correlation.md`
+- `docs/testing/archive/v0.3.4-provider-evidence-trust-correlation-closeout.md`
+
+Read older archived phase docs only when a task explicitly asks for phase
+archaeology.
+
+## Baseline Gates
+
+Documentation gate:
 
 ```powershell
-uv run python scripts/v033_retrieval_eval_release_gate.py
-uv run python -m pytest tests/test_retrieval_evaluation.py -q
 uv run python scripts/check_docs.py
+git diff --check
 ```
 
-Run the broader suite from `docs/testing.md` when touching shared retrieval,
-search, doctor, database, or CLI behavior.
+Provider baseline gate:
+
+```powershell
+uv run python scripts/provider_fake_release_gate.py
+```
+
+Real provider smoke remains environment-gated:
+
+```powershell
+uv run python scripts/provider_real_smoke.py
+```
 
 ## Explicitly Out Of Scope
 
 - `indb ask`
 - generated answers, summaries, claims, cards, or notes
 - writes to `citations`
-- LLM judges, providers, hidden network calls, or cost-bearing services
+- LLM judges, hidden network calls, or cost-bearing services
+- default HTTP, queue, or MCP provider profiles
+- provider backend selection exposed to ordinary users
+- direct swallow or transition calls from `indbase_agent`
+- provider cache as durable indbase truth
+- `swallow://...`, `transition://...`, provider cache paths, or `file://...`
+  provider artifacts in consoler artifact blocks
 - retrieval ranking rewrites
-- taxonomy/profile/source mutation through evaluation
+- taxonomy/profile mutation through provider migration
+- source revision mutation outside promotion or normalize `--replace-current`
 - consoler protocol/runtime/store/schema changes from this repository
-- Web UI, vault browser, source browser, and multi-action workflows
+- Web UI, vault browser, source browser, provider job browser, and multi-action
+  workflows
 
-## Implementation Notes
+## Notes For Implementation Agents
 
-- Eval/readiness status and `error_json` fields make failures visible; v0.3.3
-  does not create task records for lightweight eval runs.
-- Readiness verdicts are `ready`, `needs_more_evidence`, and `not_ready`.
-- Hard source-binding and quote failures must remain `not_ready`.
-- Future `ask` must consume an explicit readiness-checked `retrieval_run_id`;
-  it must not run hidden retrieval internally.
+- The vault is the system of record.
+- `indbase_core` defines provider ports and evidence package contracts.
+- `src/indbase_integrations/` owns provider adapters.
+- Provider artifacts must be copied into `.indbase/artifacts/...` before
+  promotion or output recording.
+- Ingest remains evidence -> promotion -> immutable revision/chunks/FTS.
+- Output remains source revision -> derived artifact/output run.
+- Default source search indexes trusted current source chunks only.
+- Agent operation trace may include provider correlation metadata, but artifact
+  blocks remain `indbase://...` URIs.

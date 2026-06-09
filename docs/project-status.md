@@ -1,6 +1,6 @@
 # Project Status
 
-As of: 2026-06-07
+As of: 2026-06-09
 
 This is the compressed status layer for indbase. It answers what exists now and
 where to find canonical detail. It is not an evidence archive or phase plan.
@@ -16,12 +16,18 @@ source snippets.
 
 Current active work:
 
-- `v0.3.3` Retrieval Evaluation / Answer Readiness.
+- None. `v0.3.4` Provider Evidence / Trust Correlation is the latest completed
+  baseline.
 
-Completed recent coordination:
+Completed recent baselines:
 
+- `v0.3.4` Provider Evidence / Trust Correlation is closed out. indbase now
+  consumes packaged providers as evidence producers and remains the trust
+  boundary and vault state owner.
 - `v0.3.2.3f` indbase NL v2 intent drafting coordination is closed out in this
   repo. Consoler owned the V4g TUI/provider behavior.
+- `v0.3.3` Retrieval Evaluation / Answer Readiness is the previous retrieval
+  evaluation baseline.
 
 ## Default Reading Set
 
@@ -34,7 +40,7 @@ Completed recent coordination:
 Read contracts, ADRs, current agent rules, and active phase specs only when the
 task needs them. Historical docs are not default reading.
 
-## Shipped / Frozen
+## Shipped / Frozen / Completed
 
 | Area | Status | Canonical docs | Gates |
 | --- | --- | --- | --- |
@@ -47,40 +53,49 @@ task needs them. Historical docs are not default reading.
 | v0.3.2.2 tag/search governance | shipped | archived spec and closeout in `docs/phase-manifest.yaml` | `scripts/v0322_tag_search_governance_release_gate.py` |
 | v0.3.2 retrieval intelligence | completed | archived spec, closeout, and dogfood evidence in `docs/phase-manifest.yaml` | `scripts/v032_retrieval_release_gate.py` |
 | v0.3.2.3 through v0.3.2.3f consoler Source Trust coordination | completed | archived specs and closeouts in `docs/phase-manifest.yaml` | adapter gates, coordination tests, and consoler-owned gates in `docs/testing.md` |
+| v0.3.3 Retrieval Evaluation / Answer Readiness | completed | archived spec in `docs/phase-manifest.yaml` | `scripts/v033_retrieval_eval_release_gate.py` |
+| v0.3.4 Provider Evidence / Trust Correlation | completed | archived spec and closeout in `docs/phase-manifest.yaml` | `scripts/provider_fake_release_gate.py` |
 
 ## Active
 
 | Phase | Owner | Spec | Agent rules | Gate |
 | --- | --- | --- | --- | --- |
-| v0.3.3 Retrieval Evaluation / Answer Readiness | indbase | `docs/planning/active/v0.3.3-retrieval-evaluation-answer-readiness.md` | `docs/agents/current/indbase.md` | `uv run python scripts/v033_retrieval_eval_release_gate.py` |
+| None | indbase | N/A | `docs/agents/current/indbase.md` | baseline: `uv run python scripts/check_docs.py` |
 
-## Active Behavior Summary
+## Latest Completed Behavior Summary
 
-v0.3.3 adds deterministic retrieval evaluation and answer-readiness reports.
+v0.3.4 made indbase consume packaged providers as evidence producers while
+remaining the trust boundary and vault state owner.
 
 It owns:
 
-- retrieval evaluation cases, runs, and results
-- answer readiness reports
-- deterministic JSONL import/export
-- deterministic readiness policy
-- `indb eval retrieval ...` CLI behavior
-- doctor integrity checks for eval/readiness records
-- `scripts/v033_retrieval_eval_release_gate.py`
+- provider capability contracts and bindings
+- fake provider deterministic tests
+- swallow ingest adapter extraction
+- transition output adapter extraction
+- evidence package mapping and copied evidence storage
+- provider run metadata and trace correlation
+- provider error mapping into indbase observability
+- provider-aware doctor sections
+- provider evidence artifact summaries
+- search pollution gates for candidates, exports, evidence, and old revisions
 
 It does not implement:
 
 - `indb ask`
 - generated answers, summaries, claims, cards, or notes
-- LLM judges, providers, or network calls
-- retrieval ranking rewrites
-- source, taxonomy, profile, or output artifact mutation through eval itself
+- LLM judges or default network provider profiles
+- provider backend selection for ordinary users
+- direct provider calls from `indbase_agent`
+- provider cache as durable truth
+- export artifacts or unpromoted candidates in default source search
 
 ## Superseded
 
 | Old rule | Superseded by |
 | --- | --- |
 | v0.1 direct normalizer / MarkItDown production conversion | v0.2 swallow ingest, `docs/planning/superseded/v0.1-direct-normalizer-rules.md` |
+| swallow and transition as special indbase integration stages | v0.3.4 provider capability contract and adapter layer |
 | v0.3.1 broad taxonomy/directory intelligence plan | split into category foundation, tag governance, and retrieval intelligence; see `docs/planning/superseded/v0.3.1-taxonomy-foundation.md` |
 | root `AGENTS.md` as full phase encyclopedia | `docs/active/current.md`, `docs/phase-manifest.yaml`, `docs/contracts/`, and archive files |
 | root `CONTEXT.md` as full glossary | `CONTEXT.md` index plus `docs/glossary/*.md` packs |
@@ -89,9 +104,13 @@ It does not implement:
 
 - Cloud sync, hosted queues, or multi-user SaaS.
 - Physical delete of revisions/chunks in normal workflows.
-- Default LLM behavior, provider calls, `ask`, or generated answers.
-- Web UI, vault browser, source browser, and mutation UI from consoler.
-- Treating candidates or export artifacts as trusted source revisions.
+- Default LLM behavior, provider calls outside approved provider ports, `ask`,
+  or generated answers.
+- Default HTTP, queue, or MCP provider profiles.
+- Web UI, vault browser, source browser, provider job browser, and mutation UI
+  from consoler.
+- Treating candidates, copied provider evidence, or export artifacts as trusted
+  source revisions.
 
 ## Current Release Gates
 
@@ -106,7 +125,13 @@ uv run python scripts/check_docs.py
 Current focused gate:
 
 ```powershell
-uv run python scripts/v033_retrieval_eval_release_gate.py
+uv run python scripts/provider_fake_release_gate.py
+```
+
+Provider smoke:
+
+```powershell
+uv run python scripts/provider_real_smoke.py
 ```
 
 See `docs/testing.md` for the full gate matrix and closeout evidence.

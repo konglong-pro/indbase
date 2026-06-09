@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.util import find_spec
 import json
 from pathlib import Path
@@ -38,6 +38,7 @@ class DoctorFinding:
 class DoctorReport:
     vault_path: Path
     findings: tuple[DoctorFinding, ...]
+    providers: dict[str, object] = field(default_factory=dict)
 
     @property
     def exit_code(self) -> int:
@@ -60,6 +61,7 @@ class DoctorReport:
                 }
                 for finding in self.findings
             ],
+            "providers": self.providers,
         }
 
 
@@ -104,11 +106,12 @@ def run_doctor(vault_path: Path | str) -> DoctorReport:
         findings.append(_swallow_availability_finding())
     if config is not None:
         findings.extend(_check_transition_output_runtime(paths, config))
+    providers = _provider_doctor_summary(config)
 
     if not any(finding.severity in {"warning", "error", "critical"} for finding in findings):
         findings.append(DoctorFinding("info", "ok", "Vault health checks passed."))
 
-    return DoctorReport(vault_path=paths.root, findings=tuple(findings))
+    return DoctorReport(vault_path=paths.root, findings=tuple(findings), providers=providers)
 
 
 def _ocr_availability_finding() -> DoctorFinding:
@@ -137,6 +140,40 @@ def _swallow_availability_finding() -> DoctorFinding:
         "swallow_available",
         "swallow ingest is enabled and the swallow package is importable.",
     )
+
+
+def _provider_doctor_summary(config) -> dict[str, object]:
+    if config is None:
+        return {
+            "swallow": {
+                "configured": False,
+                "binding_profile": "local_core",
+                "capabilities_ok": False,
+                "warnings": ["config_missing"],
+            },
+            "transition": {
+                "configured": False,
+                "binding_profile": "node_bridge",
+                "capabilities_ok": False,
+                "warnings": ["config_missing"],
+            },
+        }
+    from indbase_integrations.swallow.doctor import check_swallow_provider
+    from indbase_integrations.transition.doctor import check_transition_provider
+
+    swallow = check_swallow_provider(
+        configured=bool(config.features.swallow_ingest),
+        binding_profile="local_core",
+    ).to_dict()
+    transition = check_transition_provider(
+        configured=bool(config.features.transition_output),
+        binding_profile="node_bridge",
+    ).to_dict()
+    transition["capabilities_ok"] = bool(transition.get("configured")) and bool(transition.get("node_ok"))
+    return {
+        "swallow": swallow,
+        "transition": transition,
+    }
 
 
 def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
@@ -192,6 +229,7 @@ def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
             findings.extend(_check_swallow_conversion_integrity(connection, vault_root))
             findings.extend(_check_archive_ingest_integrity(connection))
             findings.extend(_check_swallow_artifact_integrity(connection, vault_root))
+            findings.extend(_check_provider_run_integrity(connection, vault_root))
             findings.extend(_check_output_run_integrity(connection, vault_root))
             findings.extend(_check_review_queue(connection))
             findings.extend(_check_taxonomy_integrity(connection))
@@ -203,6 +241,111 @@ def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
     except sqlite3.Error as exc:
         findings.append(DoctorFinding("error", "database_error", str(exc)))
     return findings
+
+
+def _check_provider_run_integrity(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    try:
+        provider_rows = connection.execute(
+            """
+            SELECT provider_run_id, provider_id, provider_status, evidence_status,
+                   evidence_root, manifest_artifact_ref_json, trace_artifact_ref_json
+            FROM provider_runs
+            ORDER BY created_at, provider_run_id
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return findings
+    for row in provider_rows:
+        provider_run_id = str(row["provider_run_id"])
+        evidence_root = str(row["evidence_root"] or "")
+        if row["evidence_status"] == "copied":
+            if not evidence_root or not (vault_root / evidence_root).is_dir():
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        "provider_evidence_root_missing",
+                        f"Provider run {provider_run_id} has copied evidence but missing evidence_root.",
+                    )
+                )
+        for column, code in (
+            ("manifest_artifact_ref_json", "provider_manifest_missing"),
+            ("trace_artifact_ref_json", "provider_trace_missing"),
+        ):
+            ref_path = _artifact_ref_vault_path(row[column])
+            if ref_path and not (vault_root / ref_path).is_file():
+                findings.append(
+                    DoctorFinding(
+                        "error",
+                        code,
+                        f"Provider run {provider_run_id} references missing evidence file: {ref_path}",
+                    )
+                )
+    findings.extend(
+        _check_adopted_provider_refs(
+            connection,
+            table="ingest_runs",
+            id_column="ingest_id",
+            code="ingest_provider_run_missing",
+        )
+    )
+    findings.extend(
+        _check_adopted_provider_refs(
+            connection,
+            table="converter_runs",
+            id_column="converter_run_id",
+            code="converter_provider_run_missing",
+        )
+    )
+    findings.extend(
+        _check_adopted_provider_refs(
+            connection,
+            table="output_runs",
+            id_column="output_run_id",
+            code="output_provider_run_missing",
+        )
+    )
+    return findings
+
+
+def _check_adopted_provider_refs(
+    connection: sqlite3.Connection,
+    *,
+    table: str,
+    id_column: str,
+    code: str,
+) -> list[DoctorFinding]:
+    rows = connection.execute(
+        f"""
+        SELECT owner.{id_column} AS owner_id, owner.adopted_provider_run_id
+        FROM {table} owner
+        LEFT JOIN provider_runs pr ON pr.provider_run_id = owner.adopted_provider_run_id
+        WHERE owner.adopted_provider_run_id IS NOT NULL
+          AND pr.provider_run_id IS NULL
+        ORDER BY owner.{id_column}
+        """
+    ).fetchall()
+    return [
+        DoctorFinding(
+            "error",
+            code,
+            f"{table}.{id_column} {row['owner_id']} references missing provider_run_id {row['adopted_provider_run_id']}.",
+        )
+        for row in rows
+    ]
+
+
+def _artifact_ref_vault_path(value: object) -> str | None:
+    if not value:
+        return None
+    try:
+        payload = json.loads(str(value))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    vault_path = payload.get("vault_path")
+    return str(vault_path) if vault_path else None
 
 
 def _check_document_files(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:

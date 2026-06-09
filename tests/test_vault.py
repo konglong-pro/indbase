@@ -26,6 +26,7 @@ def test_init_vault_creates_layout_config_db_categories_and_task(tmp_path: Path)
         "0009_retrieval_intelligence",
         "0010_retrieval_evaluation",
         "0011_v032_tag_governance_foundation",
+        "0012_provider_evidence",
     )
     assert result.inserted_categories == 10
 

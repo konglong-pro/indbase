@@ -46,3 +46,9 @@ and `../../phase-manifest.yaml`.
 | --- | --- |
 | v0.3.2 retrieval intelligence | `v0.3.2-retrieval-intelligence-closeout.md` |
 | v0.3.2 retrieval dogfood | `v0.3.2-retrieval-dogfood-report.md` |
+
+## Provider Evidence Closeouts
+
+| Phase | File |
+| --- | --- |
+| v0.3.4 provider evidence / trust correlation | `v0.3.4-provider-evidence-trust-correlation-closeout.md` |

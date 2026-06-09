@@ -92,23 +92,25 @@ def check_manifest(errors: list[str]) -> None:
 
     text = read_text(manifest)
     areas = parse_current_manifest(text)
-    active_areas = {
-        area: values
-        for area, values in areas.items()
-        if values.get("status") == "active"
-    }
-    if len(active_areas) != 1:
+    active_areas = {area: values for area, values in areas.items() if values.get("status") == "active"}
+    if len(active_areas) > 1:
         fail(
             errors,
-            f"expected exactly one active current area in phase manifest; found {len(active_areas)}",
+            f"expected at most one active current area in phase manifest; found {len(active_areas)}",
         )
+    if not areas:
+        fail(errors, "phase manifest has no current areas")
+    if areas and not active_areas:
+        current_doc = ROOT / "docs" / "active" / "current.md"
+        if not current_doc.exists() or "There is no active indbase implementation phase" not in read_text(current_doc):
+            fail(errors, "phase manifest has no active area but docs/active/current.md does not say so")
 
-    for area, values in active_areas.items():
+    for area, values in areas.items():
         gate = values.get("release_gate")
-        if not gate or gate in {"null", "None"}:
+        if values.get("status") == "active" and (not gate or gate in {"null", "None"}):
             fail(errors, f"active area {area} has no release_gate")
         elif gate.startswith("scripts/") and not (ROOT / gate).exists():
-            fail(errors, f"active area {area} release_gate does not exist: {gate}")
+            fail(errors, f"current area {area} release_gate does not exist: {gate}")
 
     for relative in sorted(manifest_paths(text)):
         path = ROOT / relative
@@ -170,6 +172,8 @@ def check_new_archive_metadata(errors: list[str]) -> None:
         "v0.3.2.2/*.plan.md",
         "v0.3.2-retrieval-intelligence/*.plan.md",
         "v0.3.2.3*/*.plan.md",
+        "v0.3.3/*.plan.md",
+        "v0.3.4/*.plan.md",
     ):
         archive_files.extend(planning_archive.glob(pattern))
     for pattern in (
@@ -177,6 +181,7 @@ def check_new_archive_metadata(errors: list[str]) -> None:
         "v0.3.1*.md",
         "v0.3.2*.md",
         "v0.3.3*.md",
+        "v0.3.4*.md",
     ):
         archive_files.extend(agent_archive.glob(pattern))
 
@@ -203,6 +208,8 @@ def check_testing_archive(errors: list[str]) -> None:
         "v0.2*-closeout.md",
         "v0.3.1*-closeout.md",
         "v0.3.2*-closeout.md",
+        "v0.3.3*-closeout.md",
+        "v0.3.4*-closeout.md",
     )
     closeouts: list[Path] = []
     for pattern in closeout_patterns:
