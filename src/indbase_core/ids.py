@@ -17,7 +17,7 @@ def new_doc_id(now: datetime | None = None, short_id: str | None = None) -> str:
 
 def new_prefixed_id(prefix: str, now: datetime | None = None, short_id: str | None = None) -> str:
     timestamp = now or datetime.now().astimezone()
-    suffix = short_id or random_suffix()
+    suffix = short_id or random_suffix(length=12)
     return f"{prefix}_{timestamp:%Y%m%d}_{suffix}"
 
 

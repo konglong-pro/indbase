@@ -1,6 +1,6 @@
 # Testing and Release Verification
 
-**As of:** 2026-06-09
+**As of:** 2026-06-10
 
 This document is the **canonical summary of what is tested and what must pass** for day-to-day development and release. For delivery scope see [project-status.md](project-status.md). For historical v0.2 gate policy see [planning/archive/v0.2/release-gate-checkpoint.md](planning/archive/v0.2/release-gate-checkpoint.md).
 
@@ -59,6 +59,12 @@ uv run python scripts/provider_fake_release_gate.py
 $env:INDBASE_PROVIDER_SMOKE_REQUIRED='1'  # formal release only
 uv run python scripts/provider_real_smoke.py
 
+# v0.3.5 engineering stability hardening
+uv run python scripts/provider_stage1_release_gate.py
+uv run python -m pytest tests/test_normalize_replace_regression.py tests/test_indexer.py tests/test_doctor.py -q
+uv run python -m pytest tests/test_indbase_agent_readonly_views.py tests/test_retrieval_regression.py -q
+uv run python scripts/v035_stability_hardening_gate.py
+
 # Optional aggregate (D/E skip unless env set)
 uv run python scripts/v02_release_gate.py
 ```
@@ -69,7 +75,14 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 
 The `test` job also runs `uv run python scripts/check_docs.py` to enforce the
 documentation lifecycle gate. The `provider-v034` job runs the v0.3.4 provider
-fake release gate.
+fake release gate. v0.3.5 adds installed-wheel, transition distribution,
+trusted-context consoler contract, and stability hardening jobs.
+
+C6c checks out `konglong-pro/consoler` and installs
+`sdks/python` through `CONSOLER_SDK_SOURCE_PATH`; no private PyPI is required.
+The workflow pins the consoler checkout to `consoler-agent-sdk-v0.1.0`.
+Release environments may still use `CONSOLER_PYPI_SIMPLE_URL` plus secret
+credentials when a published `consoler-agent-sdk==0.1.0` index exists.
 
 | Check name | Layer | Command |
 | --- | --- | --- |
@@ -84,6 +97,10 @@ fake release gate.
 | C2e - v0.3.2.3 consoler coordination gates | v0.3.2.3c/3d/3f | `tests/test_v0323c_indbase_coordination.py`, `tests/test_v0323d_indbase_intent_coordination.py`, `tests/test_v0323f_indbase_nl_v2_coordination.py` |
 | C4 - v0.3.3 retrieval eval/readiness gate | v0.3.3 | `scripts/v033_retrieval_eval_release_gate.py` |
 | C5 - v0.3.4 provider fake gate | v0.3.4 | `scripts/provider_fake_release_gate.py` |
+| C6a - v0.3.5 installed wheel smoke | v0.3.5 | `scripts/provider_installed_wheel_smoke.py` |
+| C6b - v0.3.5 transition distribution smoke | v0.3.5 | `scripts/provider_transition_distribution_smoke.py` |
+| C6c - v0.3.5 consoler SDK contract | v0.3.5 | `scripts/provider_consoler_contract_smoke.py` in trusted contexts |
+| C6d - v0.3.5 stability hardening gate | v0.3.5 | `scripts/v035_stability_hardening_gate.py` |
 | retired template guard | guard | no `minimal` template in `scripts/`, `README.md`, `docs/development.md` |
 
 Layer **E** (real corpus): [`.github/workflows/release-dogfood.yml`](../.github/workflows/release-dogfood.yml) — manual or weekly; uses `tests/fixtures/v02_dogfood_corpus/` or repo variable `INDB_REAL_CORPUS`.
@@ -188,6 +205,11 @@ Configuration: `pyproject.toml` → `[tool.pytest.ini_options]` (`testpaths = ["
 | `provider_contract_gate.py` | v0.3.4 | Provider contract compile and focused contract tests |
 | `provider_fake_release_gate.py` | v0.3.4 C | Provider contracts, fake ingest/output behavior, evidence copy, provider runs, output trust, and provider artifact views |
 | `provider_real_smoke.py` | v0.3.4 D | Environment-gated real provider smoke; missing runtime is explicit skip by default and fail when `INDBASE_PROVIDER_SMOKE_REQUIRED=1` |
+| `provider_installed_wheel_smoke.py` | v0.3.5 C | Built wheel imports provider packages and package data from outside the source tree |
+| `provider_transition_distribution_smoke.py` | v0.3.5 C | Built wheel runs transition Node bridge normalize replace and proves copied provider evidence index |
+| `provider_consoler_contract_smoke.py` | v0.3.5 C | Built wheel installs `indbase[consoler-agent]` and verifies `consoler-agent-sdk==0.1.0`; skips only when not required and package index is unavailable |
+| `provider_stage1_release_gate.py` | v0.3.5 C | Aggregates fake provider, installed wheel, transition distribution, and consoler contract smokes |
+| `v035_stability_hardening_gate.py` | v0.3.5 C | Aggregates Stage 1 gate plus normalize replace, source FTS lineage, doctor drift, artifact view leak, retrieval regression, compileall, and docs checks |
 
 Shared helpers: `scripts/gate_common.py`.
 
@@ -248,6 +270,7 @@ files are not default reading; start from `docs/project-status.md` or
 | v0.3.2.3e | [archive/v0.3.2.3e-closeout.md](testing/archive/v0.3.2.3e-closeout.md) | Real dogfood friction pass |
 | v0.3.2.3f | [archive/v0.3.2.3f-closeout.md](testing/archive/v0.3.2.3f-closeout.md) | Opt-in assisted NL v2 coordination |
 | v0.3.4 | [archive/v0.3.4-provider-evidence-trust-correlation-closeout.md](testing/archive/v0.3.4-provider-evidence-trust-correlation-closeout.md) | Provider evidence / trust correlation |
+| v0.3.5 | [archive/v0.3.5-engineering-stability-hardening-closeout.md](testing/archive/v0.3.5-engineering-stability-hardening-closeout.md) | Engineering stability hardening |
 
 ## What passing means (release bar)
 
@@ -268,6 +291,7 @@ v0323e consoler V4f friction gate passed in E:\consoler (when coordinating conso
 v0323f indbase NL v2 coordination contract passed (when coordinating consoler v4g)
 v033 retrieval eval/readiness gate passed (when touching retrieval evaluation)
 v034 provider fake gate passed
+v035 stability hardening gate passed
 GitHub CI green (A–D + v0.3.1/v0.3.2/v0.3.2.1/v0.3.2.2 gates on ubuntu-latest)
 doctor hard findings = 0 on deterministic healthy vault
 ```

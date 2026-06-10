@@ -438,7 +438,7 @@ def normalize_replace_current(
             parent_revision_id=current_revision_id,
             new_revision_id=new_revision_id,
         )
-        reindex_document_fts(connection, paths.root, doc_id)
+        reindex_document_fts(connection, paths.root, doc_id, trigger="normalize_replace")
         if config.features.embedding:
             _mark_doc_embeddings_stale(connection, doc_id)
         _finish_output_run(
@@ -495,6 +495,14 @@ def normalize_replace_current(
                 """,
                 (utc_now_iso(), created_id),
             )
+        _restore_failed_normalize_current_state(
+            connection,
+            paths.root,
+            doc_id=doc_id,
+            previous_revision_id=current_revision_id,
+            previous_markdown_path=str(revision["markdown_path"]),
+            created_revision_id=created_id,
+        )
         _finish_output_run(connection, output_run_id, status="failed")
         finish_provider_run(
             connection,
@@ -940,6 +948,62 @@ def _write_normalized_revision(
         (new_revision_id, now, output_run_id),
     )
     return type("Written", (), {"markdown_path": rel_path, "revision_id": new_revision_id})()
+
+
+def _restore_failed_normalize_current_state(
+    connection: sqlite3.Connection,
+    vault_path: Path,
+    *,
+    doc_id: str,
+    previous_revision_id: str,
+    previous_markdown_path: str,
+    created_revision_id: str | None,
+) -> None:
+    now = utc_now_iso()
+    connection.execute(
+        """
+        UPDATE documents
+        SET current_revision_id = ?, canonical_path = ?, updated_at = ?
+        WHERE doc_id = ?
+        """,
+        (previous_revision_id, previous_markdown_path, now, doc_id),
+    )
+    connection.execute(
+        """
+        UPDATE document_revisions
+        SET promotion_status = 'promoted', updated_at = ?
+        WHERE revision_id = ?
+        """,
+        (now, previous_revision_id),
+    )
+    if created_revision_id:
+        connection.execute(
+            """
+            UPDATE document_revisions
+            SET promotion_status = 'never_promoted', updated_at = ?
+            WHERE revision_id = ?
+            """,
+            (now, created_revision_id),
+        )
+        connection.execute(
+            "UPDATE chunks SET is_current = 0, updated_at = ? WHERE revision_id = ?",
+            (now, created_revision_id),
+        )
+    connection.execute(
+        """
+        UPDATE chunks
+        SET is_current = CASE WHEN revision_id = ? THEN 1 ELSE 0 END,
+            updated_at = ?
+        WHERE doc_id = ?
+        """,
+        (previous_revision_id, now, doc_id),
+    )
+    try:
+        reindex_document_fts(connection, vault_path, doc_id, trigger="normalize_replace_rollback")
+    except Exception:
+        # Failure reporting below still records the provider/output error. Keep
+        # current pointer restored even if index repair cannot complete.
+        pass
 
 
 def _insert_output_run(

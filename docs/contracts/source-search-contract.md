@@ -22,6 +22,17 @@ Define trusted source snippet search behavior.
 - Invalid filters fail explicitly.
 - Valid filters with no matches return empty success.
 - Stable JSON output is defined in `docs/contracts/search-json-contract.md`.
+- Source FTS materialization is traceable through companion lineage tables:
+  `index_builds` and `index_build_entries`.
+- `chunks_fts` schema remains unchanged. Lineage rows carry
+  `index_kind = source_fts`, `doc_id`, `revision_id`, `chunk_id`, and
+  `index_build_id`.
+- Current source search rows must agree with current document revision pointers
+  and current chunks.
+- Doctor reports current/search breakage as errors, including missing current
+  FTS rows, stale FTS rows, and lineage entries pointing to missing chunks.
+- Upgraded historical FTS rows without lineage and historical non-current
+  lineage are warnings until a real rebuild creates fresh verified lineage.
 
 ## Non-Goals
 
@@ -35,3 +46,6 @@ Define trusted source snippet search behavior.
 
 - Run `uv run python scripts/v0322_tag_search_governance_release_gate.py` when
   governed search semantics are touched.
+- Run `uv run python scripts/v035_stability_hardening_gate.py` when source FTS
+  lineage, normalize replace indexing, or retrieval regression thresholds are
+  touched.

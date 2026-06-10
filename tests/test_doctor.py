@@ -27,6 +27,8 @@ from indbase_core.swallow_adapter import (
 from indbase_core.time import utc_now_iso
 from indbase_core.translations import translate_full_document
 from indbase_core.vault import init_vault
+from indbase_core.provider_runs import create_provider_run, finish_provider_run
+from indbase_core.paths import vault_paths
 
 
 def _m3_indexed_vault(vault: Path, source: Path) -> str:
@@ -186,6 +188,24 @@ def test_doctor_accepts_indexed_m3_vault(tmp_path: Path) -> None:
     assert "revision_content_hash_mismatch" not in _codes(report)
 
 
+def test_doctor_warns_when_current_fts_row_lacks_lineage(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    source = tmp_path / "note.md"
+    source.write_text("# Note\nBody\n", encoding="utf-8")
+    _m3_indexed_vault(vault, source)
+
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        connection.execute("DELETE FROM index_build_entries")
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = run_doctor(vault)
+
+    assert _finding(report, "source_fts_lineage_missing").severity == "warning"
+
+
 def test_doctor_does_not_report_legacy_markitdown_availability(tmp_path: Path, monkeypatch) -> None:
     vault = tmp_path / "vault"
     init_vault(vault)
@@ -211,6 +231,43 @@ def test_doctor_reports_missing_swallow_when_enabled(tmp_path: Path, monkeypatch
 
     assert report.exit_code == 2
     assert _finding(report, "swallow_unavailable").severity == "error"
+
+
+def test_doctor_warns_for_failed_provider_run_without_failure_class(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    init_vault(vault)
+    paths = vault_paths(vault)
+    connection = connect(paths.db_path)
+    try:
+        seed = create_provider_run(
+            connection,
+            paths,
+            provider_id="swallow",
+            provider_package="swallow",
+            provider_version="unknown",
+            capability_id="swallow.ingest.file",
+            transport_profile="local_core",
+        )
+        finish_provider_run(
+            connection,
+            seed.provider_run_id,
+            provider_status="failed",
+            evidence_status="pending",
+            primary_error_code="provider_unknown_error",
+            provider_error_code="LEGACY_UNKNOWN",
+            error_count=1,
+        )
+        connection.execute(
+            "UPDATE provider_runs SET failure_class = NULL WHERE provider_run_id = ?",
+            (seed.provider_run_id,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = run_doctor(vault)
+
+    assert _finding(report, "provider_failure_class_missing").severity == "warning"
 
 
 def test_doctor_detects_missing_source_snapshot_and_locator_artifact(tmp_path: Path, monkeypatch) -> None:
@@ -409,6 +466,7 @@ def test_doctor_detects_missing_current_chunks_after_chunk_records_removed(tmp_p
 
     connection = connect(vault / ".indbase" / "db.sqlite")
     try:
+        connection.execute("DELETE FROM index_build_entries")
         connection.execute("DELETE FROM chunks")
         connection.commit()
     finally:

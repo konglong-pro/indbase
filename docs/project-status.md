@@ -1,6 +1,6 @@
 # Project Status
 
-As of: 2026-06-09
+As of: 2026-06-10
 
 This is the compressed status layer for indbase. It answers what exists now and
 where to find canonical detail. It is not an evidence archive or phase plan.
@@ -14,10 +14,13 @@ a vault, preserves originals, writes immutable source revisions, chunks and
 indexes trusted source text, records observability state, and returns reliable
 source snippets.
 
-Current active work:
+Current implementation state:
 
-- None. `v0.3.4` Provider Evidence / Trust Correlation is the latest completed
-  baseline.
+- No newer implementation phase is open in this worktree.
+- `v0.3.5` Engineering Stability Hardening is completed. It hardens provider
+  reliability/packaging, provider failure classification, source FTS lineage,
+  normalize replace atomicity, artifact view path redaction, and retrieval
+  regression thresholds.
 
 Completed recent baselines:
 
@@ -56,11 +59,11 @@ task needs them. Historical docs are not default reading.
 | v0.3.3 Retrieval Evaluation / Answer Readiness | completed | archived spec in `docs/phase-manifest.yaml` | `scripts/v033_retrieval_eval_release_gate.py` |
 | v0.3.4 Provider Evidence / Trust Correlation | completed | archived spec and closeout in `docs/phase-manifest.yaml` | `scripts/provider_fake_release_gate.py` |
 
-## Active
+## Latest Completed Baseline
 
 | Phase | Owner | Spec | Agent rules | Gate |
 | --- | --- | --- | --- | --- |
-| None | indbase | N/A | `docs/agents/current/indbase.md` | baseline: `uv run python scripts/check_docs.py` |
+| v0.3.5 Engineering Stability Hardening | indbase | `docs/planning/active/v0.3.5-engineering-stability-hardening.scope.md` | `docs/agents/current/indbase.md` | `uv run python scripts/v035_stability_hardening_gate.py` |
 
 ## Latest Completed Behavior Summary
 

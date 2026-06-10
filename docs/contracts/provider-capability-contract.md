@@ -38,6 +38,13 @@ one provider execution attempt and its copied evidence.
 an indbase-owned vault path after copy, and an indbase URI for bounded external
 views. External callers see only `indbase://...` URIs.
 
+**Provider Failure Class**: Canonical indbase classification of why a provider
+attempt did not produce trusted complete output.
+
+**Provider Health**: Doctor-visible cheap or smoke-level provider availability
+summary for configured state, runtime availability, capability compatibility,
+and stable findings.
+
 ## Rules
 
 - Providers produce evidence, candidates, or derived artifacts. They do not
@@ -148,6 +155,7 @@ State fields are split:
 ```text
 provider_status   = success | partial | failed | cancelled
 evidence_status   = pending | copied | missing_required | invalid | copy_failed
+failure_class     = nullable ProviderFailureClass
 ```
 
 Time fields are split:
@@ -172,6 +180,29 @@ Unknown provider errors map to `provider_unknown_error` and must keep bounded
 raw provider error context. Known provider errors must not fall into unknown in
 contract tests.
 
+Canonical failure classes:
+
+```text
+provider_unavailable
+provider_timeout
+provider_contract_violation
+provider_low_quality_candidate
+provider_artifact_copy_failed
+provider_partial_success
+provider_unsupported_input
+provider_unknown_failure
+```
+
+New failed or partial provider runs must write `failure_class`. Upgraded
+historical rows may keep null values; doctor reports those rows as warnings.
+`provider_partial_success` is non-fatal for `provider_status = partial`.
+`provider_artifact_copy_failed` means indbase failed to adopt provider evidence
+into vault-owned storage and must not treat the operation as trusted complete.
+
+Provider run metadata may include policy hints such as `retryable`,
+`fallback_candidate`, and `recommended_action`, but v0.3.5 does not execute
+automatic retry or fallback.
+
 The table stores summary and artifact refs only:
 
 ```text
@@ -187,6 +218,26 @@ output_count
 
 Complete manifests, traces, reports, and provider outputs live under the
 provider evidence root.
+
+## Provider Health
+
+Ordinary doctor runs cheap provider health checks. Release gates may run
+smoke-level provider checks. The stable provider health shape is:
+
+```text
+provider_id
+configured
+binding_profile
+provider_version
+capabilities_ok
+runtime_ok
+smoke_status = not_run | skipped | passed | failed
+findings[] = { severity, code, message, failure_class?, required?, skipped? }
+```
+
+Cheap health must report missing optional installs, missing runtimes,
+capability/profile mismatch, and binding drift with stable finding codes. It
+must not include `checked_at` in ordinary doctor output.
 
 ## Evidence Roots And Views
 
@@ -209,6 +260,12 @@ indbase://provider_runs/<provider_run_id>/evidence
 File-level evidence URIs such as
 `indbase://provider_runs/<id>/files/manifest.json` are not part of the consoler
 artifact block surface.
+
+Copied provider evidence must include a readable indbase-owned
+`evidence_index.json` when `evidence_status = copied`. Doctor checks copied
+roots, manifest refs, trace refs, evidence index JSON shape, vault-relative
+artifact refs, and capability-level required evidence roles. Required roles are
+policy-defined by capability, not one global artifact list.
 
 ## Adopted Runs And Existing Tables
 

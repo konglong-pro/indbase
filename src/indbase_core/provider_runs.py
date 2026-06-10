@@ -15,6 +15,7 @@ from indbase_core.capabilities.contracts import (
     EvidencePackageStatus,
     EvidenceStatus,
     IndbaseProviderErrorCode,
+    ProviderFailureClass,
     ProviderError,
 )
 from indbase_core.ids import new_prefixed_id
@@ -169,10 +170,28 @@ def finish_provider_run(
     error_count: int = 0,
     primary_error_code: str | IndbaseProviderErrorCode | None = None,
     provider_error_code: str | None = None,
+    failure_class: str | ProviderFailureClass | None = None,
     provider_error: ProviderError | dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
     now = utc_now_iso()
+    provider_status_value = str(_enum_value(provider_status) or "")
+    evidence_status_value = _enum_value(evidence_status) if evidence_status is not None else None
+    primary_error_value = _enum_value(primary_error_code)
+    provider_id = _provider_id_for_run(connection, provider_run_id)
+    failure_class_value = _provider_failure_class_value(failure_class) or map_provider_failure_class(
+        provider_id,
+        provider_error_code,
+        provider_status=provider_status_value,
+        evidence_status=evidence_status_value,
+        primary_error_code=primary_error_value,
+    )
+    merged_metadata = _merge_provider_run_metadata(
+        connection,
+        provider_run_id,
+        metadata,
+        failure_class=failure_class_value,
+    )
     connection.execute(
         """
         UPDATE provider_runs
@@ -186,6 +205,7 @@ def finish_provider_run(
             error_count = ?,
             primary_error_code = ?,
             provider_error_code = ?,
+            failure_class = ?,
             provider_error_json = ?,
             metadata_json = COALESCE(?, metadata_json),
             finished_at = ?,
@@ -193,18 +213,19 @@ def finish_provider_run(
         WHERE provider_run_id = ?
         """,
         (
-            _enum_value(provider_status),
+            provider_status_value,
             provider_version,
-            _enum_value(evidence_status) if evidence_status is not None else None,
+            evidence_status_value,
             provider_job_id,
             _artifact_json(manifest_artifact_ref),
             _artifact_json(trace_artifact_ref),
             warning_count,
             error_count,
-            _enum_value(primary_error_code),
+            primary_error_value,
             provider_error_code,
+            failure_class_value,
             _provider_error_json(provider_error),
-            _json(metadata),
+            _json(merged_metadata),
             now,
             now,
             provider_run_id,
@@ -248,7 +269,7 @@ def get_provider_run(connection: sqlite3.Connection, provider_run_id: str) -> sq
                transport_profile, provider_job_id, provider_status, evidence_status,
                started_at, finished_at, input_sha256, manifest_artifact_ref_json,
                trace_artifact_ref_json, evidence_root, warning_count, error_count,
-               primary_error_code, provider_error_code, provider_error_json,
+               primary_error_code, provider_error_code, failure_class, provider_error_json,
                metadata_json, created_at, updated_at
         FROM provider_runs
         WHERE provider_run_id = ?
@@ -268,6 +289,38 @@ def map_provider_error_code(provider_id: str, provider_code: str | None, *, part
     if provider_id == "transition":
         return _TRANSITION_ERROR_MAP.get(code, IndbaseProviderErrorCode.PROVIDER_UNKNOWN_ERROR.value)
     return IndbaseProviderErrorCode.PROVIDER_UNKNOWN_ERROR.value
+
+
+def map_provider_failure_class(
+    provider_id: str,
+    provider_code: str | None,
+    *,
+    provider_status: str | EvidencePackageStatus | None = None,
+    evidence_status: str | EvidenceStatus | None = None,
+    primary_error_code: str | IndbaseProviderErrorCode | None = None,
+    partial: bool = False,
+) -> str | None:
+    evidence_status_value = str(_enum_value(evidence_status) or "")
+    if evidence_status_value == EvidenceStatus.COPY_FAILED.value:
+        return ProviderFailureClass.PROVIDER_ARTIFACT_COPY_FAILED.value
+    provider_status_value = str(_enum_value(provider_status) or "")
+    if partial or provider_status_value == EvidencePackageStatus.PARTIAL.value:
+        return ProviderFailureClass.PROVIDER_PARTIAL_SUCCESS.value
+    if provider_status_value not in {"failed", "cancelled"} and not primary_error_code:
+        return None
+    indbase_code = str(_enum_value(primary_error_code) or "")
+    if indbase_code:
+        mapped = _ERROR_CODE_FAILURE_CLASS_MAP.get(indbase_code)
+        if mapped:
+            return mapped
+    if not provider_code:
+        return ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value
+    code = provider_code.upper()
+    if provider_id == "swallow":
+        return _SWALLOW_FAILURE_CLASS_MAP.get(code, ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value)
+    if provider_id == "transition":
+        return _TRANSITION_FAILURE_CLASS_MAP.get(code, ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value)
+    return ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value
 
 
 def provider_run_indbase_uri(provider_run_id: str) -> str:
@@ -300,6 +353,38 @@ _TRANSITION_ERROR_MAP = {
     "WRITE_REFUSED": IndbaseProviderErrorCode.PROVIDER_OUTPUT_WRITE_FAILED.value,
 }
 
+_ERROR_CODE_FAILURE_CLASS_MAP = {
+    IndbaseProviderErrorCode.PROVIDER_DEPENDENCY_MISSING.value: ProviderFailureClass.PROVIDER_UNAVAILABLE.value,
+    IndbaseProviderErrorCode.PROVIDER_INPUT_UNSUPPORTED.value: ProviderFailureClass.PROVIDER_UNSUPPORTED_INPUT.value,
+    IndbaseProviderErrorCode.PROVIDER_INPUT_TOO_LARGE.value: ProviderFailureClass.PROVIDER_UNSUPPORTED_INPUT.value,
+    IndbaseProviderErrorCode.PROVIDER_QUALITY_REJECTED.value: ProviderFailureClass.PROVIDER_LOW_QUALITY_CANDIDATE.value,
+    IndbaseProviderErrorCode.PROVIDER_TIMEOUT.value: ProviderFailureClass.PROVIDER_TIMEOUT.value,
+    IndbaseProviderErrorCode.PROVIDER_CANCELLED.value: ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value,
+    IndbaseProviderErrorCode.PROVIDER_PARTIAL_SUCCESS.value: ProviderFailureClass.PROVIDER_PARTIAL_SUCCESS.value,
+    IndbaseProviderErrorCode.PROVIDER_TRANSPORT_FAILED.value: ProviderFailureClass.PROVIDER_UNAVAILABLE.value,
+    IndbaseProviderErrorCode.PROVIDER_CONFIG_ERROR.value: ProviderFailureClass.PROVIDER_CONTRACT_VIOLATION.value,
+    IndbaseProviderErrorCode.PROVIDER_OUTPUT_WRITE_FAILED.value: ProviderFailureClass.PROVIDER_ARTIFACT_COPY_FAILED.value,
+    IndbaseProviderErrorCode.PROVIDER_UNKNOWN_ERROR.value: ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value,
+}
+
+_SWALLOW_FAILURE_CLASS_MAP = {
+    "WORKER_NOT_REGISTERED": ProviderFailureClass.PROVIDER_UNAVAILABLE.value,
+    "QUALITY_BELOW_THRESHOLD": ProviderFailureClass.PROVIDER_LOW_QUALITY_CANDIDATE.value,
+    "INPUT_TOO_LARGE_SYNC": ProviderFailureClass.PROVIDER_UNSUPPORTED_INPUT.value,
+    "BROWSER_CAPTURE_INVALID": ProviderFailureClass.PROVIDER_UNSUPPORTED_INPUT.value,
+    "WORKER_TIMEOUT": ProviderFailureClass.PROVIDER_TIMEOUT.value,
+}
+
+_TRANSITION_FAILURE_CLASS_MAP = {
+    "PRETTIER_FAILED": ProviderFailureClass.PROVIDER_CONTRACT_VIOLATION.value,
+    "ZHLINT_FAILED": ProviderFailureClass.PROVIDER_CONTRACT_VIOLATION.value,
+    "PANDOC_FAILED": ProviderFailureClass.PROVIDER_PARTIAL_SUCCESS.value,
+    "PDF_ENGINE_MISSING": ProviderFailureClass.PROVIDER_UNAVAILABLE.value,
+    "CHECK_CHANGES": ProviderFailureClass.PROVIDER_CONTRACT_VIOLATION.value,
+    "CONFIG_OR_INPUT": ProviderFailureClass.PROVIDER_CONTRACT_VIOLATION.value,
+    "WRITE_REFUSED": ProviderFailureClass.PROVIDER_ARTIFACT_COPY_FAILED.value,
+}
+
 
 def _artifact_json(ref: ArtifactRef | None) -> str | None:
     if ref is None:
@@ -311,16 +396,84 @@ def _provider_error_json(error: ProviderError | dict[str, Any] | None) -> str | 
     if error is None:
         return None
     if isinstance(error, ProviderError):
-        payload = {
-            "code": error.code,
-            "message": error.message,
-            "severity": error.severity,
-            "mapped_code": error.mapped_code,
-            "details": error.details,
-        }
+        payload = error.to_dict()
     else:
         payload = error
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _provider_id_for_run(connection: sqlite3.Connection, provider_run_id: str) -> str:
+    row = connection.execute(
+        "SELECT provider_id FROM provider_runs WHERE provider_run_id = ?",
+        (provider_run_id,),
+    ).fetchone()
+    if row is None:
+        return ""
+    return str(row["provider_id"] or "")
+
+
+def _provider_failure_class_value(value: str | ProviderFailureClass | None) -> str | None:
+    if value is None:
+        return None
+    return ProviderFailureClass(str(_enum_value(value))).value
+
+
+def _merge_provider_run_metadata(
+    connection: sqlite3.Connection,
+    provider_run_id: str,
+    metadata: dict[str, Any] | None,
+    *,
+    failure_class: str | None,
+) -> dict[str, Any] | None:
+    if metadata is None and failure_class is None:
+        return None
+    merged = _current_provider_run_metadata(connection, provider_run_id)
+    if metadata:
+        merged.update(metadata)
+    if failure_class:
+        merged["provider_run_policy"] = _policy_metadata_for_failure_class(failure_class)
+    return merged
+
+
+def _current_provider_run_metadata(connection: sqlite3.Connection, provider_run_id: str) -> dict[str, Any]:
+    row = connection.execute(
+        "SELECT metadata_json FROM provider_runs WHERE provider_run_id = ?",
+        (provider_run_id,),
+    ).fetchone()
+    if row is None or not row["metadata_json"]:
+        return {}
+    try:
+        payload = json.loads(str(row["metadata_json"]))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _policy_metadata_for_failure_class(failure_class: str) -> dict[str, Any]:
+    retryable = failure_class in {
+        ProviderFailureClass.PROVIDER_TIMEOUT.value,
+        ProviderFailureClass.PROVIDER_UNAVAILABLE.value,
+        ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value,
+    }
+    fallback_candidate = failure_class in {
+        ProviderFailureClass.PROVIDER_UNAVAILABLE.value,
+        ProviderFailureClass.PROVIDER_TIMEOUT.value,
+    }
+    recommended_action = {
+        ProviderFailureClass.PROVIDER_UNAVAILABLE.value: "check_provider_runtime",
+        ProviderFailureClass.PROVIDER_TIMEOUT.value: "retry_or_review_timeout",
+        ProviderFailureClass.PROVIDER_CONTRACT_VIOLATION.value: "review_provider_contract",
+        ProviderFailureClass.PROVIDER_LOW_QUALITY_CANDIDATE.value: "review_candidate_quality",
+        ProviderFailureClass.PROVIDER_ARTIFACT_COPY_FAILED.value: "repair_evidence_copy",
+        ProviderFailureClass.PROVIDER_PARTIAL_SUCCESS.value: "review_partial_outputs",
+        ProviderFailureClass.PROVIDER_UNSUPPORTED_INPUT.value: "choose_supported_input",
+        ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value: "inspect_provider_error",
+    }.get(failure_class, "inspect_provider_error")
+    return {
+        "retryable": retryable,
+        "fallback_candidate": fallback_candidate,
+        "recommended_action": recommended_action,
+    }
 
 
 def _json(value: dict[str, Any] | None) -> str | None:

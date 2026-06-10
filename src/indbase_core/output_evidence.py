@@ -8,7 +8,11 @@ import json
 import shutil
 from pathlib import Path
 
+from indbase_core.artifacts.evidence import ArtifactRef, ArtifactTrustLevel
+from indbase_core.artifacts.evidence_store import write_provider_evidence_index
 from indbase_core.paths import VaultPaths
+from indbase_core.provider_runs import provider_evidence_indbase_uri
+from indbase_core.transition_adapter import TRANSITION_PIN_COMMIT
 from indbase_core.transition_config import config_hash
 from indbase_core.transition_contract import BridgeEvidencePaths, BridgeResponse
 
@@ -119,6 +123,29 @@ def archive_transition_evidence(
     input_hashes_dest.write_text(json.dumps(input_payload, indent=2) + "\n", encoding="utf-8")
     input_hashes_rel = paths.relative_to_vault(input_hashes_dest)
     if provider_run_id:
+        artifacts = tuple(
+            ref
+            for ref in (
+                _artifact_ref(provider_run_id, manifest_rel, kind="manifest", role="manifest"),
+                _artifact_ref(provider_run_id, trace_rel, kind="trace", role="trace"),
+                _artifact_ref(provider_run_id, report_rel, kind="report", role="report"),
+                _artifact_ref(provider_run_id, config_rel, kind="config", role="config_snapshot"),
+                _artifact_ref(provider_run_id, input_hashes_rel, kind="input_hashes", role="input_hashes"),
+            )
+            if ref is not None
+        )
+        write_provider_evidence_index(
+            paths,
+            provider_run_id=provider_run_id,
+            provider={
+                "provider_id": "transition",
+                "provider_version": TRANSITION_PIN_COMMIT,
+                "provider_job_id": output_run_id,
+            },
+            artifacts=artifacts,
+            manifest=artifacts[0] if artifacts and artifacts[0].role == "manifest" else None,
+            trace=next((item for item in artifacts if item.role == "trace"), None),
+        )
         _mirror_output_run_evidence(paths, output_run_id, evidence_dir)
 
     return ArchivedEvidence(
@@ -142,6 +169,24 @@ def _copy_evidence_file(paths: VaultPaths, source: str | None, destination: Path
             return None
     shutil.copy2(source_path, destination)
     return paths.relative_to_vault(destination)
+
+
+def _artifact_ref(
+    provider_run_id: str,
+    rel_path: str | None,
+    *,
+    kind: str,
+    role: str,
+) -> ArtifactRef | None:
+    if rel_path is None:
+        return None
+    return ArtifactRef(
+        kind=kind,
+        vault_path=rel_path,
+        indbase_uri=provider_evidence_indbase_uri(provider_run_id),
+        trust_level=ArtifactTrustLevel.EVIDENCE,
+        role=role,
+    )
 
 
 def _mirror_output_run_evidence(paths: VaultPaths, output_run_id: str, evidence_dir: Path) -> None:

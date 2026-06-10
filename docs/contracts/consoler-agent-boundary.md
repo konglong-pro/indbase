@@ -38,6 +38,11 @@ indbase.error_show
 - List commands should not emit row-level artifact blocks.
 - Focused show commands and allowed source search/doctor operations may emit
   bounded artifacts.
+- Artifact block metadata may carry `vault_path` as internal retrieval metadata.
+  Dereferenced artifact views returned by indbase must redact local absolute
+  vault paths from top-level metadata, JSON blocks, and visible blocks.
+- Consoler artifact blocks must use `indbase://...` URIs, not provider URIs,
+  provider cache paths, `file://`, or private temporary paths.
 
 ## Non-Goals
 

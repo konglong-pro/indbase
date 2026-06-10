@@ -19,6 +19,8 @@ history log.
 
 Do not infer the current phase from filename order. Resolve it from
 `docs/phase-manifest.yaml` and then read `docs/active/current.md`.
+Planned `next` docs under `docs/planning/next/` and `docs/agents/next/` are not
+implementation authorization unless the user explicitly asks to work from them.
 
 ## Agent Behavior
 
@@ -54,13 +56,15 @@ Read `docs/active/current.md` first.
 
 Current indbase phase state:
 
-- phase id: `v0.3.4`
-- title: Provider Evidence / Trust Correlation
-- status: completed
+- phase id: `v0.3.5`
+- title: Engineering Stability Hardening
+- status: active
 - canonical spec and closeout: resolve through `docs/phase-manifest.yaml`
 - agent rules: `docs/agents/current/indbase.md`
 - current documentation gate: `uv run python scripts/check_docs.py`
 - provider baseline gate: `uv run python scripts/provider_fake_release_gate.py`
+- v0.3.5 gates: `uv run python scripts/provider_stage1_release_gate.py`,
+  `uv run python scripts/v035_stability_hardening_gate.py`
 
 Completed compatibility note: `v0.3.2.3f-indbase-nl-v2-intent-drafting` is
 closed out in this repo. Its consoler execution brief was
@@ -106,13 +110,20 @@ governance, governed search, retrieval evaluation, provider integration, or
 - Core data, revisions, chunks, ingest, output, search, doctor: read
   `docs/contracts/` and `docs/architecture.md`, then inspect
   `src/indbase_core/`.
-- Provider evidence archaeology or regression repair: read `docs/active/current.md`,
+- Provider reliability, packaging, evidence completeness, or provider failure
+  repair: read `docs/active/current.md`,
   `docs/project-status.md`, `docs/phase-manifest.yaml`, and
   `docs/contracts/provider-capability-contract.md`.
+- Normalize replace, source FTS lineage, artifact leak hardening, or retrieval
+  regression work: read `docs/planning/active/v0.3.5-engineering-stability-hardening.scope.md`
+  and the Stage 2 agent rules under `docs/agents/current/`.
 - Consoler adapter work: read `docs/contracts/consoler-agent-boundary.md` and
   `docs/contracts/artifact-contract.md`, then inspect `src/indbase_agent/`.
 - Documentation lifecycle work: read `docs/phase-manifest.yaml`,
   `docs/active/current.md`, and `scripts/check_docs.py`.
+- Future phase planning: read the relevant `docs/planning/next/` scope and
+  `docs/agents/next/` agent rules, but do not implement next-phase code unless
+  explicitly asked.
 - Historical phase archaeology: start from `docs/project-status.md`; read
   archived phase docs only when a task explicitly requires them.
 

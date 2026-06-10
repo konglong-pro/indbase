@@ -1,14 +1,29 @@
 # Current Active Work
 
-Last updated: 2026-06-09
+Last updated: 2026-06-10
 
 Source of current phase state: `docs/phase-manifest.yaml`
 
 ## Current State
 
-There is no active indbase implementation phase after the v0.3.4 closeout.
+Current phase state:
 
-Latest completed baseline:
+- There is no active indbase implementation phase in this worktree.
+- Latest completed baseline: `v0.3.5` Engineering Stability Hardening.
+- Closeout archive:
+  `docs/testing/archive/v0.3.5-engineering-stability-hardening-closeout.md`
+- Completed scope:
+  `docs/planning/active/v0.3.5-engineering-stability-hardening.scope.md`
+- Stage 1 execution plan:
+  `docs/planning/active/v0.3.5-stage1-provider-reliability-packaging.execution.md`
+- Stage 2 execution plan:
+  `docs/planning/active/v0.3.5-stage2-normalize-index-lineage.execution.md`
+- Agent rules:
+  `docs/agents/current/indbase.md`,
+  `docs/agents/current/v0.3.5-stage1-provider-reliability-packaging/AGENTS.md`,
+  and `docs/agents/current/v0.3.5-stage2-normalize-index-lineage/AGENTS.md`
+
+Previous completed baseline:
 
 - `v0.3.4` Provider Evidence / Trust Correlation.
 
@@ -55,13 +70,16 @@ indbase decision = trusted state
 
 ## Required Reading
 
-For new work:
+For v0.3.5 closeout archaeology or regression repair:
 
 - `docs/phase-manifest.yaml`
 - `docs/project-status.md`
 - `docs/testing.md`
 - `docs/contracts/`
 - `docs/agents/current/indbase.md`
+- `docs/planning/active/v0.3.5-engineering-stability-hardening.scope.md`
+- `docs/planning/active/v0.3.5-stage1-provider-reliability-packaging.execution.md`
+- `docs/planning/active/v0.3.5-stage2-normalize-index-lineage.execution.md`
 
 For v0.3.4 archaeology or regression repair:
 
@@ -85,6 +103,13 @@ Provider baseline gate:
 
 ```powershell
 uv run python scripts/provider_fake_release_gate.py
+```
+
+Latest completed v0.3.5 gates:
+
+```powershell
+uv run python scripts/provider_stage1_release_gate.py
+uv run python scripts/v035_stability_hardening_gate.py
 ```
 
 Real provider smoke remains environment-gated:

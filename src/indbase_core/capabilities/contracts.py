@@ -54,6 +54,24 @@ class IndbaseProviderErrorCode(StrEnum):
     PROVIDER_UNKNOWN_ERROR = "provider_unknown_error"
 
 
+class ProviderFailureClass(StrEnum):
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_TIMEOUT = "provider_timeout"
+    PROVIDER_CONTRACT_VIOLATION = "provider_contract_violation"
+    PROVIDER_LOW_QUALITY_CANDIDATE = "provider_low_quality_candidate"
+    PROVIDER_ARTIFACT_COPY_FAILED = "provider_artifact_copy_failed"
+    PROVIDER_PARTIAL_SUCCESS = "provider_partial_success"
+    PROVIDER_UNSUPPORTED_INPUT = "provider_unsupported_input"
+    PROVIDER_UNKNOWN_FAILURE = "provider_unknown_failure"
+
+
+class ProviderSmokeStatus(StrEnum):
+    NOT_RUN = "not_run"
+    SKIPPED = "skipped"
+    PASSED = "passed"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class CapabilityManifest:
     provider_id: str
@@ -99,6 +117,75 @@ class CapabilityManifest:
         if self.metadata:
             payload["metadata"] = dict(self.metadata)
         return payload
+
+
+@dataclass(frozen=True)
+class ProviderHealthFinding:
+    severity: str
+    code: str
+    message: str
+    failure_class: ProviderFailureClass | str | None = None
+    required: bool | None = None
+    skipped: bool | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.severity.strip():
+            raise ValueError("provider health finding severity is required")
+        if not self.code.strip():
+            raise ValueError("provider health finding code is required")
+        if not self.message.strip():
+            raise ValueError("provider health finding message is required")
+        if self.failure_class is not None:
+            object.__setattr__(self, "failure_class", ProviderFailureClass(str(self.failure_class)))
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "severity": self.severity,
+            "code": self.code,
+            "message": self.message,
+        }
+        if self.failure_class is not None:
+            payload["failure_class"] = str(self.failure_class)
+        if self.required is not None:
+            payload["required"] = self.required
+        if self.skipped is not None:
+            payload["skipped"] = self.skipped
+        if self.metadata:
+            payload["metadata"] = dict(self.metadata)
+        return payload
+
+
+@dataclass(frozen=True)
+class ProviderHealth:
+    provider_id: str
+    configured: bool
+    binding_profile: str
+    provider_version: str | None
+    capabilities_ok: bool
+    runtime_ok: bool
+    smoke_status: ProviderSmokeStatus | str = ProviderSmokeStatus.NOT_RUN
+    findings: tuple[ProviderHealthFinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        _validate_logical_id(self.provider_id, field_name="provider_id")
+        if not self.binding_profile.strip():
+            raise ValueError("binding_profile is required")
+        object.__setattr__(self, "smoke_status", ProviderSmokeStatus(str(self.smoke_status)))
+        object.__setattr__(self, "findings", tuple(self.findings))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider_id": self.provider_id,
+            "configured": self.configured,
+            "binding_profile": self.binding_profile,
+            "provider_version": self.provider_version,
+            "capabilities_ok": self.capabilities_ok,
+            "runtime_ok": self.runtime_ok,
+            "smoke_status": str(self.smoke_status),
+            "findings": [finding.to_dict() for finding in self.findings],
+        }
 
 
 @dataclass(frozen=True)

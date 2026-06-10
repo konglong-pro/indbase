@@ -19,7 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-consoler-agent = []
+consoler-agent = [
+  "consoler-agent-sdk==0.1.0",
+]
 swallow = [
   "swallow @ git+https://github.com/konglong-pro/swallow.git@f0f7fa80c0f7f5959d1d325bb5c3eb9b32082a1d",
 ]
@@ -42,15 +44,11 @@ packages = [
   "src/indbase_core",
   "src/indbase_cli",
   "src/indbase_agent",
+  "src/indbase_integrations",
 ]
 
 [tool.hatch.metadata]
 allow-direct-references = true
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/indbase_core/migrations" = "indbase_core/migrations"
-"src/indbase_core/transition_templates" = "indbase_core/transition_templates"
-"src/indbase_agent/manifest.json" = "indbase_agent/manifest.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

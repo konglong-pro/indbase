@@ -10,6 +10,10 @@ from indbase_core.capabilities.contracts import (
     InputRef,
     OutputEvidencePackage,
     ProviderError,
+    ProviderFailureClass,
+    ProviderHealth,
+    ProviderHealthFinding,
+    ProviderSmokeStatus,
     ProviderProfile,
     ProviderWarning,
     SourceBinding,
@@ -80,6 +84,43 @@ def test_provider_error_preserves_raw_and_mapped_codes() -> None:
 
     assert error.primary_error_code == "provider_quality_rejected"
     assert error.to_dict()["provider_code"] == "QUALITY_BELOW_THRESHOLD"
+
+
+def test_provider_failure_class_and_health_shape_are_stable() -> None:
+    assert {item.value for item in ProviderFailureClass} == {
+        "provider_unavailable",
+        "provider_timeout",
+        "provider_contract_violation",
+        "provider_low_quality_candidate",
+        "provider_artifact_copy_failed",
+        "provider_partial_success",
+        "provider_unsupported_input",
+        "provider_unknown_failure",
+    }
+
+    health = ProviderHealth(
+        provider_id="swallow",
+        configured=True,
+        binding_profile="local_core",
+        provider_version=None,
+        capabilities_ok=False,
+        runtime_ok=False,
+        smoke_status=ProviderSmokeStatus.SKIPPED,
+        findings=(
+            ProviderHealthFinding(
+                severity="warning",
+                code="swallow_package_missing",
+                message="swallow extra is not installed.",
+                failure_class=ProviderFailureClass.PROVIDER_UNAVAILABLE,
+                required=False,
+                skipped=True,
+            ),
+        ),
+    )
+
+    payload = health.to_dict()
+    assert payload["smoke_status"] == "skipped"
+    assert payload["findings"][0]["failure_class"] == "provider_unavailable"
 
 
 def test_ingest_evidence_package_collects_provider_artifact_refs() -> None:

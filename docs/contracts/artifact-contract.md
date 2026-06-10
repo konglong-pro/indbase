@@ -28,6 +28,12 @@ artifact URI.
   SQL selectors.
 - Artifact views are bounded and must report limits and truncation state.
 - Artifact failures must return explicit stable errors.
+- Artifact retrieval metadata may carry local vault location internally, but
+  returned artifact view metadata, JSON blocks, and visible blocks must not
+  expose local absolute vault paths.
+- Artifact views must not expose provider cache paths, private temp paths,
+  `file://` URIs, provider URIs such as `swallow://...` or
+  `transition://...`, or raw trace bodies beyond bounded summaries.
 - Export artifacts are not source revisions.
 - Non-promoted conversion candidates are not source revisions.
 - Default source search must not index derived export artifacts or untrusted
@@ -43,6 +49,6 @@ artifact URI.
 ## Validation
 
 - `indbase_agent` artifact retrieval tests should cover URI kind, scope,
-  truncation, and failure behavior.
+  truncation, path redaction, and failure behavior.
 - Output and ingest gates should verify durable evidence exists before trusted
   state changes.

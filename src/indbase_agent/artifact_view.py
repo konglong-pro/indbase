@@ -134,7 +134,8 @@ def build_indbase_artifact_view(
             "block_id": block_id,
             "entity_kind": entity_kind,
             "entity_id": entity_id,
-            **(metadata or {}),
+            "vault_ref": "current",
+            **_public_metadata(metadata),
         },
         "blocks": blocks,
     }
@@ -230,7 +231,6 @@ def load_document_view(
     truncated = bool(preview.get("truncated")) or tags_truncated or chunks_truncated
     return _with_view_envelope(
         {
-            "vault_path": vault_path.as_posix(),
             "document": document_payload,
             "category": {
                 "category_id": document_payload.get("category_id"),
@@ -272,7 +272,6 @@ def load_review_item_view(vault_path: Path, review_id: str) -> dict[str, Any]:
 
     return _with_view_envelope(
         {
-            "vault_path": vault_path.as_posix(),
             "review_item": item,
             "related_rows": related_rows,
         },
@@ -298,7 +297,6 @@ def load_task_view(vault_path: Path, task_id: str) -> dict[str, Any]:
     events_truncated = len(events) > TASK_EVENT_ROWS
     return _with_view_envelope(
         {
-            "vault_path": vault_path.as_posix(),
             "task": _row_dict(task),
             "events": events[:TASK_EVENT_ROWS],
         },
@@ -324,7 +322,6 @@ def load_error_view(vault_path: Path, error_id: str) -> dict[str, Any]:
     fields_truncated = _truncate_error_fields(error_payload)
     return _with_view_envelope(
         {
-            "vault_path": vault_path.as_posix(),
             "error": error_payload,
         },
         limits={
@@ -340,6 +337,7 @@ def load_error_view(vault_path: Path, error_id: str) -> dict[str, Any]:
 
 def load_doctor_report_view(vault_path: Path) -> dict[str, Any]:
     report = run_doctor(vault_path).to_dict()
+    report.pop("vault_path", None)
     findings = report.get("findings") if isinstance(report, dict) else []
     if not isinstance(findings, list):
         findings = []
@@ -352,7 +350,6 @@ def load_doctor_report_view(vault_path: Path) -> dict[str, Any]:
     }
     return _with_view_envelope(
         {
-            "vault_path": vault_path.as_posix(),
             "doctor_report": report_payload,
         },
         limits={"doctor_finding_rows": DOCTOR_FINDING_ROWS},
@@ -376,7 +373,7 @@ def load_provider_run_view(
                    transport_profile, provider_job_id, provider_status, evidence_status,
                    started_at, finished_at, input_sha256, manifest_artifact_ref_json,
                    trace_artifact_ref_json, evidence_root, warning_count, error_count,
-                   primary_error_code, provider_error_code, provider_error_json,
+                   primary_error_code, provider_error_code, failure_class, provider_error_json,
                    metadata_json, created_at, updated_at
             FROM provider_runs
             WHERE provider_run_id = ?
@@ -419,7 +416,6 @@ def load_provider_run_view(
         evidence_summary, truncated = _provider_evidence_summary(vault_path, provider_run)
     return _with_view_envelope(
         {
-            "vault_path": vault_path.as_posix(),
             "provider_run": provider_run,
             "provider_errors": [_row_dict(item) for item in errors],
             "provider_review_items": [_row_dict(item) for item in reviews],
@@ -606,7 +602,7 @@ def doctor_report_view_blocks(view: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         markdown_block(
             f"# Doctor report\n\n"
-            f"Vault: `{view['vault_path']}`\n\n"
+            f"Vault: `current`\n\n"
             f"Exit code: **{report.get('exit_code', 0)}**\n\n"
             f"Findings: **{report.get('finding_count', len(rows))}**",
             title="Doctor report",
@@ -713,6 +709,12 @@ def _vault_path(metadata: dict[str, Any] | None, *, require_database: bool) -> P
             details={"vault_path": vault_path.as_posix()},
         )
     return vault_path
+
+
+def _public_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if not metadata:
+        return {}
+    return {key: value for key, value in metadata.items() if key != "vault_path"}
 
 
 def _connect_ro(vault_path: Path) -> sqlite3.Connection:
@@ -930,8 +932,21 @@ def _provider_evidence_index_summary(path: Path) -> dict[str, Any] | None:
         "provider_run_id": payload.get("provider_run_id"),
         "provider": payload.get("provider"),
         "artifact_count": len(artifacts) if isinstance(artifacts, list) else 0,
-        "manifest": payload.get("manifest"),
-        "trace": payload.get("trace"),
+        "manifest": _provider_index_ref_summary(payload.get("manifest")),
+        "trace": _provider_index_ref_summary(payload.get("trace")),
+    }
+
+
+def _provider_index_ref_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    vault_path = value.get("vault_path")
+    return {
+        "kind": value.get("kind"),
+        "role": value.get("role"),
+        "uri": value.get("indbase_uri"),
+        "trust_level": value.get("trust_level"),
+        "name": Path(str(vault_path)).name if vault_path else None,
     }
 
 

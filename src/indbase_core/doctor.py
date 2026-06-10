@@ -17,6 +17,8 @@ from indbase_core.artifact_policy import (
 )
 from indbase_core.config import ConfigError, load_config
 from indbase_core.conversion import hash_markdown
+from indbase_core.capabilities.contracts import ProviderFailureClass
+from indbase_core.capabilities.registry import DEFAULT_PROVIDER_BINDINGS
 from indbase_core.db import connect, load_migrations
 from indbase_core.paths import vault_paths
 from indbase_core.search_text import build_fts_text
@@ -146,17 +148,42 @@ def _provider_doctor_summary(config) -> dict[str, object]:
     if config is None:
         return {
             "swallow": {
+                "provider_id": "swallow",
                 "configured": False,
                 "binding_profile": "local_core",
+                "provider_version": None,
                 "capabilities_ok": False,
+                "runtime_ok": False,
+                "smoke_status": "not_run",
+                "findings": [
+                    {
+                        "severity": "error",
+                        "code": "config_missing",
+                        "message": "Vault config is missing; provider health cannot be evaluated.",
+                    }
+                ],
+                "package_version": None,
                 "warnings": ["config_missing"],
             },
             "transition": {
+                "provider_id": "transition",
                 "configured": False,
                 "binding_profile": "node_bridge",
+                "provider_version": None,
                 "capabilities_ok": False,
+                "runtime_ok": False,
+                "smoke_status": "not_run",
+                "findings": [
+                    {
+                        "severity": "error",
+                        "code": "config_missing",
+                        "message": "Vault config is missing; provider health cannot be evaluated.",
+                    }
+                ],
+                "package_version": None,
                 "warnings": ["config_missing"],
             },
+            "binding_drift": _provider_binding_drift_summary(),
         }
     from indbase_integrations.swallow.doctor import check_swallow_provider
     from indbase_integrations.transition.doctor import check_transition_provider
@@ -169,11 +196,95 @@ def _provider_doctor_summary(config) -> dict[str, object]:
         configured=bool(config.features.transition_output),
         binding_profile="node_bridge",
     ).to_dict()
-    transition["capabilities_ok"] = bool(transition.get("configured")) and bool(transition.get("node_ok"))
     return {
         "swallow": swallow,
         "transition": transition,
+        "binding_drift": _provider_binding_drift_summary(),
     }
+
+
+def _provider_binding_drift_summary() -> dict[str, object]:
+    manifest_path = Path(__file__).resolve().parents[2] / "capability-bindings.yaml"
+    findings: list[dict[str, object]] = []
+    if not manifest_path.is_file():
+        return {
+            "capabilities_ok": False,
+            "findings": [
+                {
+                    "severity": "warning",
+                    "code": "capability_bindings_file_missing",
+                    "message": "Repository capability-bindings.yaml is missing.",
+                }
+            ],
+        }
+    yaml_bindings = _parse_capability_bindings_yaml(manifest_path)
+    for key, binding in DEFAULT_PROVIDER_BINDINGS.items():
+        expected = yaml_bindings.get(key)
+        if expected is None:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": "provider_binding_missing_from_yaml",
+                    "message": f"Python provider binding {key} is missing from capability-bindings.yaml.",
+                    "binding": key,
+                }
+            )
+            continue
+        actual = {
+            "provider": binding.provider,
+            "provider_capability": binding.provider_capability,
+            "profile": binding.profile,
+            "feature_flag": binding.feature_flag,
+        }
+        for field, value in actual.items():
+            if expected.get(field) != value:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "provider_binding_drift",
+                        "message": f"Provider binding {key} field {field} differs from capability-bindings.yaml.",
+                        "binding": key,
+                        "field": field,
+                        "python": value,
+                        "yaml": expected.get(field),
+                    }
+                )
+    for key in sorted(set(yaml_bindings) - set(DEFAULT_PROVIDER_BINDINGS)):
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "provider_binding_extra_in_yaml",
+                "message": f"capability-bindings.yaml contains binding {key} not present in Python registry.",
+                "binding": key,
+            }
+        )
+    return {"capabilities_ok": not findings, "findings": findings}
+
+
+def _parse_capability_bindings_yaml(path: Path) -> dict[str, dict[str, str | None]]:
+    bindings: dict[str, dict[str, str | None]] = {}
+    in_bindings = False
+    current: str | None = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        if raw_line.startswith("bindings:"):
+            in_bindings = True
+            current = None
+            continue
+        if not in_bindings:
+            continue
+        if raw_line and not raw_line.startswith(" "):
+            break
+        if raw_line.startswith("  ") and not raw_line.startswith("    ") and raw_line.strip().endswith(":"):
+            current = raw_line.strip()[:-1]
+            bindings[current] = {}
+            continue
+        if current and raw_line.startswith("    ") and ":" in raw_line:
+            key, value = raw_line.strip().split(":", 1)
+            clean = value.strip() or None
+            bindings[current][key] = clean
+    return bindings
 
 
 def _check_database(vault_root: Path, db_path: Path) -> list[DoctorFinding]:
@@ -248,8 +359,9 @@ def _check_provider_run_integrity(connection: sqlite3.Connection, vault_root: Pa
     try:
         provider_rows = connection.execute(
             """
-            SELECT provider_run_id, provider_id, provider_status, evidence_status,
-                   evidence_root, manifest_artifact_ref_json, trace_artifact_ref_json
+            SELECT provider_run_id, provider_id, capability_id, provider_status,
+                   evidence_status, failure_class, evidence_root,
+                   manifest_artifact_ref_json, trace_artifact_ref_json
             FROM provider_runs
             ORDER BY created_at, provider_run_id
             """
@@ -259,6 +371,27 @@ def _check_provider_run_integrity(connection: sqlite3.Connection, vault_root: Pa
     for row in provider_rows:
         provider_run_id = str(row["provider_run_id"])
         evidence_root = str(row["evidence_root"] or "")
+        failure_class = row["failure_class"]
+        if row["provider_status"] in {"failed", "partial"}:
+            if not failure_class:
+                findings.append(
+                    DoctorFinding(
+                        "warning",
+                        "provider_failure_class_missing",
+                        f"Provider run {provider_run_id} is {row['provider_status']} but lacks failure_class.",
+                    )
+                )
+            else:
+                try:
+                    ProviderFailureClass(str(failure_class))
+                except ValueError:
+                    findings.append(
+                        DoctorFinding(
+                            "error",
+                            "provider_failure_class_invalid",
+                            f"Provider run {provider_run_id} has invalid failure_class: {failure_class}.",
+                        )
+                    )
         if row["evidence_status"] == "copied":
             if not evidence_root or not (vault_root / evidence_root).is_dir():
                 findings.append(
@@ -266,6 +399,16 @@ def _check_provider_run_integrity(connection: sqlite3.Connection, vault_root: Pa
                         "error",
                         "provider_evidence_root_missing",
                         f"Provider run {provider_run_id} has copied evidence but missing evidence_root.",
+                    )
+                )
+            else:
+                findings.extend(
+                    _check_provider_evidence_completeness(
+                        vault_root,
+                        provider_run_id=provider_run_id,
+                        provider_id=str(row["provider_id"] or ""),
+                        capability_id=str(row["capability_id"] or ""),
+                        evidence_root=evidence_root,
                     )
                 )
         for column, code in (
@@ -306,6 +449,108 @@ def _check_provider_run_integrity(connection: sqlite3.Connection, vault_root: Pa
         )
     )
     return findings
+
+
+def _check_provider_evidence_completeness(
+    vault_root: Path,
+    *,
+    provider_run_id: str,
+    provider_id: str,
+    capability_id: str,
+    evidence_root: str,
+) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    root = vault_root / evidence_root
+    index_path = root / "evidence_index.json"
+    if not index_path.is_file():
+        return [
+            DoctorFinding(
+                "error",
+                "provider_evidence_index_missing",
+                f"Provider run {provider_run_id} copied evidence but has no evidence_index.json.",
+            )
+        ]
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return [
+            DoctorFinding(
+                "error",
+                "provider_evidence_index_invalid",
+                f"Provider run {provider_run_id} evidence_index.json is invalid JSON.",
+            )
+        ]
+    if not isinstance(payload, dict):
+        return [
+            DoctorFinding(
+                "error",
+                "provider_evidence_index_invalid",
+                f"Provider run {provider_run_id} evidence_index.json is not an object.",
+            )
+        ]
+    artifacts = payload.get("artifacts")
+    artifact_refs = artifacts if isinstance(artifacts, list) else []
+    for ref in _provider_evidence_refs(payload):
+        if not isinstance(ref, dict):
+            continue
+        ref_path = ref.get("vault_path")
+        if not ref_path:
+            continue
+        ref_text = str(ref_path)
+        if Path(ref_text).is_absolute() or not is_relative_vault_path(ref_text):
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "provider_evidence_ref_not_vault_relative",
+                    f"Provider run {provider_run_id} evidence ref is not vault-relative: {ref_text}",
+                )
+            )
+            continue
+        if not (vault_root / ref_text).is_file():
+            findings.append(
+                DoctorFinding(
+                    "error",
+                    "provider_evidence_file_missing",
+                    f"Provider run {provider_run_id} evidence ref points to a missing file: {ref_text}",
+                )
+            )
+    roles = {
+        str(ref.get("role"))
+        for ref in artifact_refs
+        if isinstance(ref, dict) and ref.get("role")
+    }
+    for role in _required_evidence_roles(provider_id, capability_id):
+        if role not in roles:
+            findings.append(
+                DoctorFinding(
+                    "warning",
+                    "provider_required_evidence_role_missing",
+                    f"Provider run {provider_run_id} copied evidence lacks expected role {role}.",
+                )
+            )
+    return findings
+
+
+def _provider_evidence_refs(payload: dict[str, object]) -> list[object]:
+    refs: list[object] = []
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, list):
+        refs.extend(artifacts)
+    for key in ("manifest", "trace"):
+        value = payload.get(key)
+        if value is not None:
+            refs.append(value)
+    return refs
+
+
+def _required_evidence_roles(provider_id: str, capability_id: str) -> tuple[str, ...]:
+    if provider_id == "swallow" and capability_id.startswith("swallow.ingest."):
+        return ("candidate_markdown", "raw_metadata")
+    if provider_id == "transition" and capability_id == "transition.markdown.normalize":
+        return ("manifest", "trace")
+    if provider_id == "transition" and capability_id == "transition.markdown.export":
+        return ("manifest", "trace")
+    return ()
 
 
 def _check_adopted_provider_refs(
@@ -817,6 +1062,7 @@ def _check_fts_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
             )
         )
     findings.extend(_check_fts_metadata_integrity(connection))
+    findings.extend(_check_fts_lineage_integrity(connection))
     return findings
 
 
@@ -856,6 +1102,110 @@ def _check_fts_metadata_integrity(connection: sqlite3.Connection) -> list[Doctor
                 )
             )
     return findings
+
+
+def _check_fts_lineage_integrity(connection: sqlite3.Connection) -> list[DoctorFinding]:
+    if not _source_fts_lineage_schema_ready(connection):
+        return []
+    findings: list[DoctorFinding] = []
+    current_without_lineage = connection.execute(
+        """
+        SELECT f.chunk_id, f.doc_id, f.revision_id
+        FROM chunks_fts f
+        JOIN chunks c ON c.chunk_id = f.chunk_id
+        JOIN documents d ON d.doc_id = f.doc_id
+        WHERE d.status = 'active'
+          AND d.deleted_at IS NULL
+          AND d.current_revision_id = f.revision_id
+          AND c.revision_id = f.revision_id
+          AND c.is_current = 1
+          AND c.deleted_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM index_build_entries ibe
+            JOIN index_builds ib ON ib.index_build_id = ibe.index_build_id
+            WHERE ib.index_kind = 'source_fts'
+              AND ibe.chunk_id = f.chunk_id
+              AND ibe.status = 'indexed'
+          )
+        ORDER BY f.doc_id, f.chunk_id
+        LIMIT 50
+        """
+    ).fetchall()
+    for row in current_without_lineage:
+        findings.append(
+            DoctorFinding(
+                "warning",
+                "source_fts_lineage_missing",
+                f"Current FTS row for chunk {row['chunk_id']} has no source_fts lineage entry.",
+            )
+        )
+
+    missing_chunks = connection.execute(
+        """
+        SELECT ibe.index_build_entry_id, ibe.chunk_id
+        FROM index_build_entries ibe
+        JOIN index_builds ib ON ib.index_build_id = ibe.index_build_id
+        LEFT JOIN chunks c ON c.chunk_id = ibe.chunk_id
+        WHERE ib.index_kind = 'source_fts'
+          AND ibe.status = 'indexed'
+          AND ibe.chunk_id IS NOT NULL
+          AND c.chunk_id IS NULL
+        ORDER BY ibe.created_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
+    for row in missing_chunks:
+        findings.append(
+            DoctorFinding(
+                "error",
+                "source_fts_lineage_missing_chunk",
+                f"Source FTS lineage entry {row['index_build_entry_id']} references missing chunk {row['chunk_id']}.",
+            )
+        )
+
+    non_current_entries = connection.execute(
+        """
+        SELECT ibe.index_build_entry_id, ibe.chunk_id, ibe.doc_id, ibe.revision_id
+        FROM index_build_entries ibe
+        JOIN index_builds ib ON ib.index_build_id = ibe.index_build_id
+        JOIN documents d ON d.doc_id = ibe.doc_id
+        LEFT JOIN chunks c ON c.chunk_id = ibe.chunk_id
+        WHERE ib.index_kind = 'source_fts'
+          AND ibe.status = 'indexed'
+          AND ibe.chunk_id IS NOT NULL
+          AND c.chunk_id IS NOT NULL
+          AND (
+            d.current_revision_id != ibe.revision_id
+            OR c.revision_id != ibe.revision_id
+            OR c.is_current != 1
+            OR c.deleted_at IS NOT NULL
+          )
+        ORDER BY ibe.created_at DESC
+        LIMIT 20
+        """
+    ).fetchall()
+    for row in non_current_entries:
+        findings.append(
+            DoctorFinding(
+                "warning",
+                "source_fts_lineage_non_current",
+                f"Historical source FTS lineage entry {row['index_build_entry_id']} points to non-current chunk {row['chunk_id']}.",
+            )
+        )
+    return findings
+
+
+def _source_fts_lineage_schema_ready(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'index_build_entries'
+        """
+    ).fetchone()
+    return row is not None
 
 
 def _check_source_snapshot_integrity(connection: sqlite3.Connection, vault_root: Path) -> list[DoctorFinding]:

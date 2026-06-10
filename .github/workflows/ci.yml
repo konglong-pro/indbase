@@ -272,6 +272,120 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
 
+  provider-v035-installed-wheel:
+    name: C6a - v0.3.5 installed wheel smoke
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Installed wheel smoke
+        run: uv run python scripts/provider_installed_wheel_smoke.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+  provider-v035-transition-distribution:
+    name: C6b - v0.3.5 transition distribution smoke
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Transition distribution smoke
+        run: uv run python scripts/provider_transition_distribution_smoke.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+  provider-v035-consoler-contract:
+    name: C6c - v0.3.5 consoler SDK contract
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout consoler SDK source
+        uses: actions/checkout@v4
+        with:
+          repository: konglong-pro/consoler
+          ref: consoler-agent-sdk-v0.1.0
+          path: .tmp/consoler
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Consoler SDK installed-wheel contract
+        run: uv run python scripts/provider_consoler_contract_smoke.py
+        env:
+          INDBASE_CONSOLER_CONTRACT_REQUIRED: "1"
+          CONSOLER_SDK_SOURCE_PATH: .tmp/consoler/sdks/python
+          PYTHONIOENCODING: utf-8
+
+  provider-v035-stability:
+    name: C6d - v0.3.5 stability hardening gate
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: v0.3.5 stability hardening gate
+        run: uv run python scripts/v035_stability_hardening_gate.py
+        env:
+          PYTHONIOENCODING: utf-8
+
   swallow-smoke:
     name: D — real swallow smoke
     runs-on: ubuntu-latest

@@ -184,7 +184,9 @@ def test_artifact_views_have_current_state_envelope_and_no_nested_artifacts(tmp_
             metadata={"vault_path": vault.as_posix()},
         )
         payload = _json_block(view, json_title)["content"]
-        assert view["metadata"]["vault_path"] == vault.as_posix()
+        assert "vault_path" not in view["metadata"]
+        assert view["metadata"]["vault_ref"] == "current"
+        assert "vault_path" not in payload
         assert view["truncated"] == payload["truncated"]
         assert payload["view_semantics"] == "current_vault_state"
         assert isinstance(payload["limits"], dict)
@@ -198,6 +200,7 @@ def test_document_view_enforces_preview_chunk_and_tag_budgets(tmp_path: Path) ->
     doc_id = str(seeded["doc_id"])
     revision_id = str(seeded["revision_id"])
     with connect(vault / ".indbase" / "db.sqlite") as connection:
+        connection.execute("DELETE FROM index_build_entries WHERE doc_id = ?", (doc_id,))
         connection.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
         for sequence in range(1, 13):
             _insert_current_chunk(

@@ -14,7 +14,7 @@ else:
     build_indbase_artifact_view = None
 
 import indbase_core.conversion as conversion_module
-from indbase_core.capabilities.contracts import IndbaseProviderErrorCode
+from indbase_core.capabilities.contracts import IndbaseProviderErrorCode, ProviderFailureClass
 from indbase_core.db import connect
 from indbase_core.errors import record_error
 from indbase_core.ids import new_prefixed_id
@@ -99,7 +99,11 @@ def test_ingest_failure_maps_provider_run_to_error_and_review(tmp_path: Path, mo
     connection = connect(vault_paths(vault).db_path)
     try:
         provider_run = connection.execute(
-            "SELECT provider_run_id, provider_status, primary_error_code FROM provider_runs"
+            """
+            SELECT provider_run_id, provider_status, primary_error_code, failure_class,
+                   metadata_json
+            FROM provider_runs
+            """
         ).fetchone()
         error = connection.execute(
             "SELECT provider_run_id, error_type FROM errors WHERE provider_run_id IS NOT NULL"
@@ -112,6 +116,9 @@ def test_ingest_failure_maps_provider_run_to_error_and_review(tmp_path: Path, mo
 
     assert provider_run["provider_status"] == "failed"
     assert provider_run["primary_error_code"] == "provider_timeout"
+    assert provider_run["failure_class"] == "provider_timeout"
+    metadata = json.loads(provider_run["metadata_json"])
+    assert metadata["provider_run_policy"]["retryable"] is True
     assert error["provider_run_id"] == provider_run["provider_run_id"]
     assert review["provider_run_id"] == provider_run["provider_run_id"]
     assert review["ingest_run_id"] == result.ingest_id
@@ -171,7 +178,7 @@ def test_transition_partial_export_records_derived_artifact_trust(tmp_path: Path
         )
         provider_run = connection.execute(
             """
-            SELECT provider_status, evidence_status, primary_error_code
+            SELECT provider_status, evidence_status, primary_error_code, failure_class
             FROM provider_runs
             WHERE output_run_id = ?
             """,
@@ -193,6 +200,7 @@ def test_transition_partial_export_records_derived_artifact_trust(tmp_path: Path
     assert provider_run["provider_status"] == "partial"
     assert provider_run["evidence_status"] == "copied"
     assert provider_run["primary_error_code"] == "provider_partial_success"
+    assert provider_run["failure_class"] == "provider_partial_success"
     assert {row["trust_level"] for row in artifacts} <= {"derived_candidate", "derived_output"}
     assert {row["artifact_role"] for row in artifacts} == {"export_output", "normalized_markdown"}
 
@@ -217,7 +225,7 @@ def test_transition_failure_preserves_provider_error_and_evidence(tmp_path: Path
         provider_run = connection.execute(
             """
             SELECT provider_run_id, provider_status, evidence_status, provider_error_json,
-                   evidence_root
+                   failure_class, evidence_root
             FROM provider_runs
             ORDER BY created_at DESC
             LIMIT 1
@@ -231,6 +239,7 @@ def test_transition_failure_preserves_provider_error_and_evidence(tmp_path: Path
 
     assert provider_run["provider_status"] == "failed"
     assert provider_run["evidence_status"] == "copied"
+    assert provider_run["failure_class"] == "provider_unknown_failure"
     assert provider_run["provider_error_json"]
     assert error["provider_run_id"] == provider_run["provider_run_id"]
     assert (vault / str(provider_run["evidence_root"]) / "transition_manifest.json").is_file()
@@ -289,7 +298,7 @@ def test_cancelled_provider_run_can_be_recorded_as_visible_error_and_review(tmp_
         )
         connection.commit()
         row = connection.execute(
-            "SELECT primary_error_code FROM provider_runs WHERE provider_run_id = ?",
+            "SELECT primary_error_code, failure_class FROM provider_runs WHERE provider_run_id = ?",
             (seed.provider_run_id,),
         ).fetchone()
         error = connection.execute(
@@ -304,6 +313,7 @@ def test_cancelled_provider_run_can_be_recorded_as_visible_error_and_review(tmp_
         connection.close()
 
     assert row["primary_error_code"] == "provider_cancelled"
+    assert row["failure_class"] == ProviderFailureClass.PROVIDER_UNKNOWN_FAILURE.value
     assert error["provider_run_id"] == seed.provider_run_id
     assert review["provider_run_id"] == seed.provider_run_id
 

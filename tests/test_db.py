@@ -22,6 +22,8 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0010_retrieval_evaluation",
         "0011_v032_tag_governance_foundation",
         "0012_provider_evidence",
+        "0013_provider_failure_class",
+        "0014_source_fts_lineage",
     ]
 
     connection = connect(db_path)
@@ -47,6 +49,8 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         assert "candidate_cards" in tables
         assert "candidate_card_sources" in tables
         assert "provider_runs" in tables
+        assert "index_builds" in tables
+        assert "index_build_entries" in tables
         versions = [row["version"] for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")]
         assert versions == [
             "0001_initial",
@@ -62,6 +66,8 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0010_retrieval_evaluation",
             "0011_v032_tag_governance_foundation",
             "0012_provider_evidence",
+            "0013_provider_failure_class",
+            "0014_source_fts_lineage",
         ]
         assert "category_profiles" in tables
         assert "category_classification_runs" in tables
@@ -127,6 +133,7 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "transport_profile",
             "provider_status",
             "evidence_status",
+            "failure_class",
             "evidence_root",
         } <= provider_run_columns
         ingest_columns = {
@@ -159,6 +166,16 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             for row in connection.execute("PRAGMA table_info(documents)")
         }
         assert {"access_context", "privacy_flags_json", "source_snapshot_path"} <= document_columns
+        index_build_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(index_builds)")
+        }
+        assert {"index_build_id", "index_kind", "scope", "trigger", "status"} <= index_build_columns
+        index_entry_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(index_build_entries)")
+        }
+        assert {"index_build_id", "doc_id", "revision_id", "chunk_id", "status"} <= index_entry_columns
     finally:
         connection.close()
 
