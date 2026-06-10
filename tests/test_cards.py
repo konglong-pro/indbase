@@ -164,6 +164,10 @@ def test_candidate_card_rejects_source_shell_archived_old_revision_and_no_chunk(
             (no_chunk_doc["doc_id"], no_chunk_doc["current_revision_id"]),
         )
         connection.execute(
+            "DELETE FROM index_build_entries WHERE doc_id = ? AND revision_id = ?",
+            (no_chunk_doc["doc_id"], no_chunk_doc["current_revision_id"]),
+        )
+        connection.execute(
             "DELETE FROM chunks WHERE doc_id = ? AND revision_id = ?",
             (no_chunk_doc["doc_id"], no_chunk_doc["current_revision_id"]),
         )

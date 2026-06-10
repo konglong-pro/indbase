@@ -133,13 +133,25 @@ def set_document_category(
         connection.execute(
             """
             UPDATE documents
-            SET category_id = ?, updated_at = ?
+            SET category_id = ?, classification_status = 'manual', updated_at = ?
             WHERE doc_id = ?
               AND deleted_at IS NULL
             """,
             (category_id, now, doc_id),
         )
         refresh_document_fts_metadata(connection, doc_id)
+        connection.commit()
+    elif row["category_id"] == category_id:
+        connection.execute(
+            """
+            UPDATE documents
+            SET classification_status = 'manual', updated_at = ?
+            WHERE doc_id = ?
+              AND deleted_at IS NULL
+              AND COALESCE(classification_status, '') NOT IN ('manual', 'accepted')
+            """,
+            (utc_now_iso(), doc_id),
+        )
         connection.commit()
     return DocumentCategoryChange(
         doc_id=doc_id,
@@ -201,20 +213,25 @@ def list_documents(
         clauses.append("d.category_id = ?")
         params.append(category_id)
     if tag is not None:
+        from indbase_core.tag_search import TRUSTED_DOCUMENT_TAG_SOURCES, resolve_tag_filter
+
+        resolution = resolve_tag_filter(connection, tag)
+        placeholders = ", ".join("?" for _ in resolution.filter_tag_ids)
+        trusted_sources = ", ".join(f"'{value}'" for value in sorted(TRUSTED_DOCUMENT_TAG_SOURCES))
         clauses.append(
-            """
+            f"""
             EXISTS (
               SELECT 1
               FROM document_tags filter_dt
-              JOIN tags filter_t ON filter_t.tag_id = filter_dt.tag_id
               WHERE filter_dt.doc_id = d.doc_id
                 AND filter_dt.deleted_at IS NULL
-                AND filter_t.deleted_at IS NULL
-                AND filter_t.normalized_name = ?
+                AND filter_dt.status = 'active'
+                AND filter_dt.source IN ({trusted_sources})
+                AND filter_dt.tag_id IN ({placeholders})
             )
             """
         )
-        params.append(normalize_tag_name(tag))
+        params.extend(resolution.filter_tag_ids)
     params.append(limit)
 
     return list(

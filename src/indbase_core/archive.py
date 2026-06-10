@@ -112,7 +112,7 @@ def _archive_one(
             VALUES (
               ?, NULL, ?, ?, ?, 'active', ?, ?, ?, ?, NULL, ?, NULL,
               'cat_uncategorized', NULL, NULL, 0, 'archived', 'not_indexed',
-              'not_applicable', 'manual', ?, ?
+              'not_applicable', NULL, ?, ?
             )
             """,
             (

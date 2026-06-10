@@ -4,7 +4,7 @@ import indbase_core.normalizers as normalizers
 from indbase_core.chunker import chunk_current_revision, chunk_id_for_revision
 from indbase_core.conversion import hash_markdown
 from indbase_core.db import connect
-from indbase_core.indexer import rebuild_fts_index
+from indbase_core.indexer import rebuild_fts_index, refresh_document_fts_metadata
 from indbase_core.ingest import run_m2_ingest_pipeline
 from indbase_core.time import utc_now_iso
 from indbase_core.vault import init_vault
@@ -29,6 +29,25 @@ def test_rebuild_fts_index_indexes_active_current_chunks_with_cjk_bigrams(tmp_pa
                 "SELECT chunk_id, doc_id, revision_id, title, text FROM chunks_fts ORDER BY chunk_id"
             )
         )
+        build = connection.execute(
+            """
+            SELECT index_build_id, index_kind, scope, trigger, status
+            FROM index_builds
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        lineage_entries = list(
+            connection.execute(
+                """
+                SELECT doc_id, revision_id, chunk_id, status
+                FROM index_build_entries
+                WHERE index_build_id = ?
+                ORDER BY chunk_id
+                """,
+                (build["index_build_id"],),
+            )
+        )
         cjk_hit = connection.execute(
             "SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ?",
             ("知识",),
@@ -48,6 +67,12 @@ def test_rebuild_fts_index_indexes_active_current_chunks_with_cjk_bigrams(tmp_pa
     assert len(fts_rows) == 2
     assert fts_rows[0]["doc_id"] == doc["doc_id"]
     assert "知识" in fts_rows[0]["text"]
+    assert build["index_kind"] == "source_fts"
+    assert build["scope"] == "vault"
+    assert build["trigger"] == "manual_rebuild"
+    assert build["status"] == "succeeded"
+    assert len(lineage_entries) == len(fts_rows)
+    assert {row["status"] for row in lineage_entries} == {"indexed"}
     assert cjk_hit is not None
     assert english_hit is not None
 
@@ -68,6 +93,7 @@ def test_rebuild_fts_index_is_idempotent(tmp_path: Path) -> None:
         second = rebuild_fts_index(connection, vault)
         fts_count = connection.execute("SELECT COUNT(*) AS count FROM chunks_fts").fetchone()
         errors = connection.execute("SELECT COUNT(*) AS count FROM errors WHERE component = 'fts_indexer'").fetchone()
+        builds = connection.execute("SELECT COUNT(*) AS count FROM index_builds WHERE index_kind = 'source_fts'").fetchone()
     finally:
         connection.close()
 
@@ -75,6 +101,45 @@ def test_rebuild_fts_index_is_idempotent(tmp_path: Path) -> None:
     assert second.indexed_chunks == 1
     assert fts_count["count"] == 1
     assert errors["count"] == 0
+    assert builds["count"] == 2
+
+
+def test_refresh_document_fts_metadata_writes_source_fts_lineage(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    init_vault(vault)
+    source = tmp_path / "note.md"
+    source.write_text("# Note\nMetadata refresh body\n", encoding="utf-8")
+    run_m2_ingest_pipeline(vault, source)
+
+    connection = connect(vault / ".indbase" / "db.sqlite")
+    try:
+        doc_id = connection.execute("SELECT doc_id FROM documents").fetchone()["doc_id"]
+        chunk_current_revision(connection, vault, doc_id)
+        refresh_document_fts_metadata(connection, doc_id)
+        build = connection.execute(
+            """
+            SELECT index_build_id, scope, trigger, status
+            FROM index_builds
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        entry = connection.execute(
+            """
+            SELECT doc_id, chunk_id, status
+            FROM index_build_entries
+            WHERE index_build_id = ?
+            """,
+            (build["index_build_id"],),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert build["scope"] == "document"
+    assert build["trigger"] == "metadata_refresh"
+    assert build["status"] == "succeeded"
+    assert entry["doc_id"] == doc_id
+    assert entry["status"] == "indexed"
 
 
 def test_rebuild_fts_index_excludes_archived_documents_and_old_revisions(tmp_path: Path) -> None:
@@ -173,6 +238,17 @@ def test_rebuild_fts_index_records_error_and_review_for_missing_chunks(tmp_path:
             "SELECT type, target_type, target_id, reason FROM review_items WHERE type = 'indexing_failed'"
         ).fetchone()
         fts_count = connection.execute("SELECT COUNT(*) AS count FROM chunks_fts").fetchone()
+        build = connection.execute(
+            "SELECT index_build_id, status FROM index_builds ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        failed_entry = connection.execute(
+            """
+            SELECT status, reason
+            FROM index_build_entries
+            WHERE index_build_id = ?
+            """,
+            (build["index_build_id"],),
+        ).fetchone()
     finally:
         connection.close()
 
@@ -187,6 +263,9 @@ def test_rebuild_fts_index_records_error_and_review_for_missing_chunks(tmp_path:
     assert review["target_id"] == document["doc_id"]
     assert "missing_current_chunks" in review["reason"]
     assert fts_count["count"] == 0
+    assert build["status"] == "failed"
+    assert failed_entry["status"] == "failed"
+    assert failed_entry["reason"] == "missing_current_chunks"
 
 
 def test_rebuild_fts_index_records_missing_markdown_before_indexing_chunks(tmp_path: Path) -> None:

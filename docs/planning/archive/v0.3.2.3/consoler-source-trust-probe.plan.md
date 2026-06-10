@@ -1,0 +1,263 @@
+---
+doc_type: phase_plan
+phase_id: v0.3.2.3
+title: Consoler Source Trust Probe
+status: completed
+canonical: true
+read_by_default: false
+closeout: docs/testing/archive/v0.3.2.3-closeout.md
+related_contracts:
+  - docs/contracts/artifact-contract.md
+  - docs/contracts/consoler-agent-boundary.md
+  - docs/contracts/source-search-contract.md
+---
+
+# v0.3.2.3 Consoler Source Trust Probe
+
+Status: active design
+
+Date: 2026-06-03
+
+Phase: v0.3.2.3 consoler-backed Source Trust Loop probe
+
+Related docs:
+
+- [v0.3.1 Taxonomy Category Foundation](../v0.3.1/taxonomy-category-foundation.plan.md)
+- [v0.3.2 Tag Governance Foundation](../v0.3.2/tag-governance-foundation.plan.md)
+- [v0.3.2.1 Tag Harness Hardening](../v0.3.2.1/tag-harness-hardening.plan.md)
+- [v0.3.2.2 Tag/Search Governance](../v0.3.2.2/tag-search-governance.plan.md)
+- [v0.3.2.3 Consoler Source Trust Probe Agent Guide](../../../agents/archive/indbase/v0.3.2.3-consoler-source-trust-probe.md)
+- `E:\consoler\docs\planning\v4b-indbase-source-trust-probe.md`
+- `E:\consoler\docs\adr\0006-product-variants-keep-agent-specific-ui-boundaries.md`
+- [Taxonomy glossary](../../../../CONTEXT.md)
+
+## Objective
+
+Restore and stabilize `indbase_agent` as an out-of-process consoler adapter for a narrow dogfood loop:
+
+```text
+doctor -> ingest one file -> search trusted source snippets
+-> inspect review/task/error state -> inspect one source document
+```
+
+This phase proves that indbase can be operated through a consoler Console Variant without weakening the existing vault, category, tag, search, review, task, error, and revision boundaries.
+
+## Scope
+
+In scope:
+
+- `src/indbase_agent` source restoration or minimal reimplementation.
+- Optional `consoler-agent` package extra that does not force regular `uv`
+  lock/update paths to resolve the private consoler SDK.
+- Wheel/package inclusion for `indbase_agent`.
+- `indbase_agent` manifest and command adapters.
+- Direct calls from `indbase_agent` into `indbase_core` services.
+- Bounded artifact views through existing consoler artifact retrieval.
+- Focused adapter tests and optional local cross-repo smoke.
+
+Out of scope:
+
+- No consoler protocol, runtime, transport, store, or SDK changes.
+- No `indbase_core` import of `consoler_agent_sdk`.
+- No shelling out to `indb` CLI from the adapter.
+- No full TUI, Web UI, vault browser, file viewer, or row-level table interaction.
+- No output/generated loop, transition export UI, translation UI, retrieval packages, `ask`, or answer generation.
+- No category/tag governance mutation commands.
+- No `review_resolve` in the first probe.
+- No production schema migration unless a missing read-only view cannot be expressed safely with existing schema.
+
+## Assumptions
+
+- `consoler-agent-sdk` is provided by the consoler runtime, an internal/private
+  developer environment, or an explicit local test path during development.
+- The committed `pyproject.toml` must not contain `file:///E:/consoler` path dependencies.
+- Regular indbase development should not require consoler SDK installation.
+- The only first-version write command is `indbase.ingest_file`.
+- All other first-version commands are read-only.
+- The old `indbase_agent` Python source may be missing; do not decompile `__pycache__`.
+
+## Command Surface
+
+First-version commands:
+
+```text
+indbase.doctor
+indbase.ingest_file
+indbase.search_sources
+indbase.review_list
+indbase.review_show
+indbase.task_list
+indbase.task_show
+indbase.error_list
+indbase.error_show
+indbase.doc_show
+```
+
+Rules:
+
+- All commands use the existing consoler action lifecycle: validate, plan, preview when relevant, approval, execute, events, result blocks.
+- Do not add a direct-execute shortcut.
+- `indbase.ingest_file` keeps `probe_readonly` preview approval and accepts one local file only.
+- Read-only commands must not mutate vault state, task state, review state, search indexes, category assignments, tags, or revisions.
+
+## Search Sources Contract
+
+`indbase.search_sources` args:
+
+```text
+vault_path
+query
+category?
+tag?
+top_k?
+```
+
+Rules:
+
+- No `mode`, vector, hybrid, retrieval package, semantic expansion, or rerank option.
+- `query = ""` is allowed only when `category` or `tag` is present.
+- Category, tag, and text constraints use the v0.3.2.2 AND semantics.
+- Invalid filters fail the action with structured `AgentError.details`.
+- Valid filters with no matches succeed with an empty result set.
+- Result blocks are limited to existing markdown, table, JSON, and artifact blocks.
+- Search results may emit at most five distinct `indbase.document` artifacts.
+- Search artifacts must include `metadata.vault_path`.
+- Do not emit revision or chunk artifacts from search results in the first probe.
+
+## Document And Artifact Views
+
+`indbase.doc_show` accepts `doc_id` only.
+
+Do not add title lookup, path lookup, fuzzy lookup, or natural-language lookup in this phase.
+
+The first-version document view should show bounded, read-only trusted metadata:
+
+- document identity: `doc_id`, title, status, current revision, canonical path, original path
+- category: stable category id and display name when available
+- classification state: status and review need when available
+- tags: formal tag id/name/status/source/revision binding when available
+- revision: revision id, sequence, current flag, markdown path, converter name, text length, chunk count, content hash
+- bounded source preview from the current trusted revision
+
+Do not show:
+
+- full source file contents
+- candidate tags as trusted tags
+- full tag governance event history
+- old revision content unless a later phase adds explicit revision browsing
+
+## Implementation Plan
+
+### Slice 1: adapter source recovery
+
+Look for old `indbase_agent` source in git history, local backups, or previous branch state.
+
+If it is not found quickly, reimplement a minimal adapter from the current indbase core and consoler SDK docs.
+
+Hard rule:
+
+```text
+Do not decompile src/indbase_agent/__pycache__.
+```
+
+### Slice 2: package boundary
+
+Add the optional extra as a packaging hook only:
+
+```toml
+[project.optional-dependencies]
+consoler-agent = []
+```
+
+Add `src/indbase_agent` to the indbase wheel package list.
+
+Do not add consoler SDK to default dependencies, dev dependencies, or committed
+lockfile sources until the SDK is available from an approved package index.
+
+### Slice 3: manifest and command adapters
+
+Implement the ten command adapters against existing `indbase_core` services.
+
+Keep URI parsing and vault DB reads inside `indbase_agent`.
+
+Do not add consoler imports anywhere under `indbase_core`.
+
+### Slice 4: source search and read-only state views
+
+Wire `search_sources`, review, task, error, and doc views to current trusted source state.
+
+Reuse v0.3.2.2 filter semantics and JSON explanation data where available.
+
+### Slice 5: tests
+
+Add focused tests for:
+
+- manifest discovery exposes exactly the first-version command set
+- `indbase_core` does not import `consoler_agent_sdk`
+- `indbase.search_sources` accepts text search and filter-only search
+- invalid category/tag filters fail with structured details
+- valid empty search succeeds
+- `doc_show` accepts `doc_id` only
+- `review_resolve` and category/tag mutation commands are absent
+- `ingest_file` is the only write command
+- artifact views are bounded and include `metadata.vault_path`
+
+### Slice 6: local cross-repo smoke
+
+After the adapter passes indbase tests, run an opt-in disposable smoke from `E:\consoler`.
+
+This smoke is local-only unless a provisioned real-agent environment is added later.
+
+## Required Validation
+
+Focused indbase checks:
+
+```powershell
+uv run python -m pytest tests/test_indbase_agent.py -q
+uv run python -m pytest tests/test_v0322_tag_search_governance.py tests/test_v032_tag_governance.py tests/test_v031_category_taxonomy.py -q
+uv run python scripts/v0322_tag_search_governance_release_gate.py
+uv run python -m compileall -q src tests scripts
+```
+
+When running adapter tests or local consoler smoke, make `consoler_agent_sdk`
+available through the selected consoler runtime, an internal package index, or an
+explicit local test path. Do not commit local wheel paths.
+
+Optional cross-repo smoke after implementation:
+
+```powershell
+cd E:\consoler
+pnpm agentctl -- discover indbase
+pnpm agentctl -- test indbase --command indbase.search_sources --args <args.json> --json
+```
+
+Do not add the optional cross-repo smoke to default indbase CI in this phase.
+
+## Acceptance Checklist
+
+- `indbase_agent` source exists and is included in the indbase wheel.
+- `indbase_agent` is the only indbase package importing `consoler_agent_sdk`.
+- `indbase_core` has no direct consoler dependency.
+- The command surface is exactly the first-version Source Trust Loop surface unless this spec is updated.
+- `indbase.ingest_file` is the only write command.
+- Search uses trusted v0.3.2.2 source/tag/category semantics.
+- `doc_show` is `doc_id` only and bounded.
+- Review/task/error commands are read-only.
+- Formal tags and categories are visible but not mutable.
+- Artifacts use `indbase://...` logical references and include `metadata.vault_path`.
+- No protocol/runtime/TUI/Web UI behavior is implemented in indbase.
+- Focused adapter tests and tag/search regression checks pass.
+
+## Completion Report
+
+Every implementation handoff should report:
+
+- changed files
+- command surface added or changed
+- package extra and wheel inclusion changes
+- adapter/core dependency boundary check
+- tests run
+- optional cross-repo smoke run or skipped
+- checks not run and why
+- remaining risks
+- confirmation that Web UI, full TUI, `ask`, retrieval packages, generated outputs, category/tag governance mutations, full file viewer, title/path lookup, and consoler protocol/runtime changes remain out of scope

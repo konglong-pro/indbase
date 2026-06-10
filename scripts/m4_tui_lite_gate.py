@@ -130,7 +130,7 @@ def main() -> None:
         ).fetchone()[0]
 
     run_indb(0, "doc", "set-category", doc_id, category_id, "--vault", str(vault))
-    run_indb(0, "tag", "add", "m4-gate", "--vault", str(vault))
+    run_indb(0, "tag", "add", "m4-gate", "--type", "topic", "--vault", str(vault))
     run_indb(0, "doc", "add-tag", doc_id, "m4-gate", "--vault", str(vault))
     doc_tags = run_indb(0, "doc", "tags", doc_id, "--vault", str(vault))
     assert_output_contains(doc_tags, "m4-gate")

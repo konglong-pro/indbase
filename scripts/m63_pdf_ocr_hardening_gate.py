@@ -1,4 +1,10 @@
-"""Run the M6.3 PDF/OCR hardening gate against temporary vaults."""
+"""Historical M6.3 PDF/OCR hardening gate for provider-era semantics.
+
+The old gate included a text-PDF direct conversion success path. That path is
+retired in v0.3.4. This gate keeps OCR shell hardening coverage and verifies
+that legacy text-PDF direct conversion fails visibly without source-search
+pollution.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +15,6 @@ import sqlite3
 
 from typer.testing import CliRunner
 
-import indbase_core.normalizers as normalizers
 from indbase_core.db import connect
 from indbase_core.doctor import run_doctor
 from indbase_core.indexer import rebuild_fts_index
@@ -27,14 +32,10 @@ ROOT = Path.cwd()
 def main() -> None:
     root = ROOT / ".tmp" / f"m63-pdf-ocr-hardening-gate-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     root.mkdir(parents=True)
-    original_markitdown = normalizers._run_markitdown_file
-    try:
-        shell = _pdf_failed_shell_then_ocr_success(root / "failed-shell")
-        policy = _pdf_text_ocr_policy_and_force(root / "ocr-policy")
-        sidecars = _ocr_sidecar_validation_and_rerun(root / "sidecars")
-        negatives = _doctor_m6_negative_cases(root / "doctor-negative")
-    finally:
-        normalizers._run_markitdown_file = original_markitdown
+    shell = _pdf_failed_shell_then_ocr_success(root / "failed-shell")
+    policy = _pdf_text_ocr_policy_and_force(root / "ocr-policy")
+    sidecars = _ocr_sidecar_validation_and_rerun(root / "sidecars")
+    negatives = _doctor_m6_negative_cases(root / "doctor-negative")
 
     summary = {
         **shell,
@@ -59,6 +60,7 @@ def main() -> None:
         raise RuntimeError(f"M6.3 doctor negative coverage too low: {summary}")
 
     print(json.dumps(summary, sort_keys=True))
+    print("M63_PDF_OCR_HARDENING_GATE_MODE=historical_provider_era_legacy_retired")
     print("M63_PDF_OCR_HARDENING_GATE=passed")
     print(f"DOGFOOD_ROOT={root}")
 
@@ -68,7 +70,6 @@ def _pdf_failed_shell_then_ocr_success(root: Path) -> dict[str, int]:
     source = root / "scan.pdf"
     root.mkdir(parents=True)
     source.write_bytes(b"%PDF image only")
-    normalizers._run_markitdown_file = lambda _path: " "
     init_vault(vault)
     ingest = run_m3_ingest_pipeline(vault, source)
 
@@ -153,68 +154,52 @@ def _pdf_text_ocr_policy_and_force(root: Path) -> dict[str, int]:
     source = root / "paper.pdf"
     root.mkdir(parents=True)
     source.write_bytes(b"%PDF text")
-    normalizers._run_markitdown_file = lambda _path: "# Paper\nm63pdftextunique 大语言模型\n"
     init_vault(vault)
     ingest = run_m3_ingest_pipeline(vault, source)
-    if ingest.status != "succeeded":
-        raise RuntimeError(f"text PDF ingest failed: {ingest}")
+    if ingest.status != "completed_with_issues" or ingest.searchable:
+        raise RuntimeError(f"text PDF legacy retirement was not visible: {ingest}")
 
     connection = connect(vault / ".indbase" / "db.sqlite")
     try:
-        row = connection.execute("SELECT doc_id, original_path, current_revision_id FROM documents").fetchone()
-        doc_id = str(row["doc_id"])
-        original_revision = str(row["current_revision_id"])
-        original_path = str(row["original_path"])
-        (vault / original_path).with_name("original.pdf.ocr.txt").write_text("blockedocrunique", encoding="utf-8")
-        blocked = run_ocr_for_document(connection, vault, doc_id)
-        after_block = connection.execute("SELECT current_revision_id, quality_status, needs_review FROM documents").fetchone()
-        blocked_search = search_chunks(connection, "blockedocrunique")
-
-        bad_json = (vault / original_path).with_name("original.pdf.ocr.json")
-        bad_json.write_text('[{"page_number": 1, "text": "bad", "confidence": "0.5"}]', encoding="utf-8")
-        failed = run_ocr_for_document(connection, vault, doc_id, force=True)
-        after_failed = connection.execute("SELECT current_revision_id, quality_status, needs_review FROM documents").fetchone()
-        preserved_search = search_chunks(connection, "m63pdftextunique")
-
-        bad_json.unlink()
-        (vault / original_path).with_name("original.pdf.ocr.txt").write_text("m63ocrforcedunique 知識管理", encoding="utf-8")
-        forced = run_ocr_for_document(connection, vault, doc_id, force=True)
-        after_forced = connection.execute("SELECT current_revision_id FROM documents").fetchone()
-        old_current_chunks = connection.execute(
-            "SELECT COUNT(*) AS count FROM chunks WHERE doc_id = ? AND revision_id = ? AND is_current = 1",
-            (doc_id, original_revision),
+        row = connection.execute(
+            """
+            SELECT current_revision_id, ingest_status, fts_status, quality_status,
+                   needs_review
+            FROM documents
+            """
         ).fetchone()
-        old_search = search_chunks(connection, "m63pdftextunique")
-        new_search = search_chunks(connection, "m63ocrforcedunique")
-        cjk_search = search_chunks(connection, "知識管理")
-        rebuild = rebuild_fts_index(connection, vault)
-        post_rebuild_search = search_chunks(connection, "m63ocrforcedunique")
+        legacy_errors = connection.execute(
+            "SELECT COUNT(*) AS count FROM errors WHERE error_type = 'legacy_conversion_retired'"
+        ).fetchone()
+        revisions = connection.execute("SELECT COUNT(*) AS count FROM document_revisions").fetchone()
+        chunks = connection.execute("SELECT COUNT(*) AS count FROM chunks").fetchone()
+        fts = connection.execute("SELECT COUNT(*) AS count FROM chunks_fts").fetchone()
+        provider_runs = connection.execute("SELECT COUNT(*) AS count FROM provider_runs").fetchone()
+        search = search_chunks(connection, "m63pdftextunique")
     finally:
         connection.close()
 
-    if blocked.status != "blocked" or after_block["current_revision_id"] != original_revision:
-        raise RuntimeError(f"OCR default did not block existing text revision: {blocked}")
-    if int(after_block["needs_review"]) != 0 or after_block["quality_status"] != "passed" or blocked_search.result_count != 0:
-        raise RuntimeError("Blocked OCR mutated document state or search")
-    if failed.status != "failed" or after_failed["current_revision_id"] != original_revision:
-        raise RuntimeError(f"Forced OCR failure mutated current revision: {failed}")
-    if after_failed["quality_status"] != "passed" or preserved_search.result_count != 1:
-        raise RuntimeError("Forced OCR failure damaged existing text revision")
-    if forced.status != "succeeded" or after_forced["current_revision_id"] == original_revision:
-        raise RuntimeError(f"Forced OCR did not create a new revision: {forced}")
-    if int(old_current_chunks["count"]) != 0 or old_search.result_count != 0:
-        raise RuntimeError("Old PDF text revision remained current after forced OCR")
-    if new_search.result_count != 1 or cjk_search.result_count != 1 or post_rebuild_search.result_count != 1:
-        raise RuntimeError("Forced OCR current revision was not searchable before/after rebuild")
+    if row["current_revision_id"] is not None or row["fts_status"] != "not_indexed":
+        raise RuntimeError(f"text PDF legacy failure became searchable: {dict(row)}")
+    if row["ingest_status"] != "failed" or row["quality_status"] != "failed" or int(row["needs_review"]) != 1:
+        raise RuntimeError(f"text PDF legacy failure state was not explicit: {dict(row)}")
+    if int(legacy_errors["count"]) != 1 or search.result_count != 0:
+        raise RuntimeError("text PDF legacy failure did not record expected error/search state")
 
     return {
-        "ocr_default_blocked_existing_revision": 1,
+        "pdf_text_legacy_retired": 1,
+        "pdf_text_legacy_revisions": int(revisions["count"]),
+        "pdf_text_legacy_chunks": int(chunks["count"]),
+        "pdf_text_legacy_fts": int(fts["count"]),
+        "pdf_text_legacy_provider_runs": int(provider_runs["count"]),
+        "pdf_text_legacy_search_results": search.result_count,
+        "ocr_default_blocked_existing_revision": 0,
         "ocr_failed_mutated_current_revisions": 0,
-        "ocr_force_success_new_revision": 1,
-        "ocr_force_old_revision_current_chunks": int(old_current_chunks["count"]),
-        "ocr_force_search_results": new_search.result_count,
-        "ocr_force_cjk_search_results": cjk_search.result_count,
-        "index_integrity_errors": rebuild.failed_documents,
+        "ocr_force_success_new_revision": 0,
+        "ocr_force_old_revision_current_chunks": 0,
+        "ocr_force_search_results": 0,
+        "ocr_force_cjk_search_results": 0,
+        "index_integrity_errors": 0,
     }
 
 
@@ -223,7 +208,6 @@ def _ocr_sidecar_validation_and_rerun(root: Path) -> dict[str, int]:
     source = root / "scan.pdf"
     root.mkdir(parents=True)
     source.write_bytes(b"%PDF image only")
-    normalizers._run_markitdown_file = lambda _path: " "
     init_vault(vault)
     run_m3_ingest_pipeline(vault, source)
 
@@ -393,7 +377,6 @@ def _failed_pdf_shell(root: Path) -> tuple[Path, str, str]:
     source = root / "scan.pdf"
     root.mkdir(parents=True)
     source.write_bytes(b"%PDF image only")
-    normalizers._run_markitdown_file = lambda _path: " "
     init_vault(vault)
     run_m3_ingest_pipeline(vault, source)
     connection = connect(vault / ".indbase" / "db.sqlite")

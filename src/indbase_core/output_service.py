@@ -9,6 +9,8 @@ import sqlite3
 from pathlib import Path
 from typing import Callable
 
+from indbase_core.artifacts.evidence import ArtifactRef, ArtifactTrustLevel
+from indbase_core.capabilities.registry import get_binding
 from indbase_core.chunker import chunk_revision, strip_frontmatter
 from indbase_core.config import IndbaseConfig, load_config
 from indbase_core.conversion import hash_markdown
@@ -16,10 +18,17 @@ from indbase_core.db import connect
 from indbase_core.errors import record_error
 from indbase_core.ids import new_prefixed_id, revision_id
 from indbase_core.indexer import reindex_document_fts
-from indbase_core.output_evidence import archive_partial_evidence, archive_transition_evidence
+from indbase_core.output_evidence import ArchivedEvidence, archive_partial_evidence, archive_transition_evidence
 from indbase_core.output_locators import record_normalize_locator_mappings
 from indbase_core.paths import vault_paths
 from indbase_core.protected_spans import spans_for_export_markdown, spans_for_normalize_body, validate_protected_spans
+from indbase_core.provider_runs import (
+    attach_provider_run_to_output,
+    create_provider_run,
+    finish_provider_run,
+    map_provider_error_code,
+    provider_evidence_indbase_uri,
+)
 from indbase_core.revisions import _render_source_markdown, _write_immutable_file
 from indbase_core.tasks import add_task_event, create_task, finish_task, start_task
 from indbase_core.time import utc_now_iso
@@ -269,6 +278,36 @@ def normalize_replace_current(
         status="running",
     )
     transition_config = load_transition_config(paths.root / config.output.config_path)
+    binding = get_binding("indbase.output.normalize")
+    provider_run = create_provider_run(
+        connection,
+        paths,
+        provider_id=binding.provider,
+        provider_package="transition",
+        provider_version=TRANSITION_PIN_COMMIT,
+        capability_id=binding.provider_capability,
+        transport_profile=binding.profile,
+        task_id=task_id,
+        output_run_id=output_run_id,
+        input_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        metadata={"mode": "source_normalize_replace_current", "doc_id": doc_id},
+    )
+    attach_provider_run_to_output(
+        connection,
+        output_run_id=output_run_id,
+        provider_run_id=provider_run.provider_run_id,
+    )
+    add_task_event(
+        connection,
+        task_id,
+        "provider_run_created",
+        "Created transition provider run for normalize.",
+        payload={
+            "provider_run_id": provider_run.provider_run_id,
+            "operation_id": provider_run.operation_id,
+            "capability_id": binding.provider_capability,
+        },
+    )
     invocation: BridgeInvocation | None = None
     try:
         invocation = _invoke_bridge(
@@ -292,6 +331,7 @@ def normalize_replace_current(
                 transition_config,
                 body,
                 invocation=invocation,
+                provider_run_id=provider_run.provider_run_id,
             )
             raise TransitionBridgeError(invocation.error or "transition_normalize_failed")
         if response.status == "failed":
@@ -302,6 +342,7 @@ def normalize_replace_current(
                 transition_config,
                 body,
                 invocation=invocation,
+                provider_run_id=provider_run.provider_run_id,
             )
             raise TransitionBridgeError("; ".join(response.errors) or "transition_normalize_failed")
         protected_specs = protected
@@ -314,15 +355,38 @@ def normalize_replace_current(
                 transition_config,
                 body,
                 invocation=invocation,
+                provider_run_id=provider_run.provider_run_id,
             )
             raise TransitionBridgeError("; ".join(errors))
-        _persist_bridge_evidence(
+        archived = _persist_bridge_evidence(
             connection,
             paths,
             output_run_id,
             response,
             transition_config,
             input_markdown=body,
+            provider_run_id=provider_run.provider_run_id,
+        )
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status="success",
+            evidence_status="copied",
+            provider_job_id=output_run_id,
+            manifest_artifact_ref=_artifact_ref_from_archived(
+                archived.manifest_path,
+                provider_run_id=provider_run.provider_run_id,
+                kind="manifest",
+                role="manifest",
+            ),
+            trace_artifact_ref=_artifact_ref_from_archived(
+                archived.trace_path,
+                provider_run_id=provider_run.provider_run_id,
+                kind="trace",
+                role="trace",
+            ),
+            warning_count=0,
+            error_count=0,
         )
         sequence = int(revision["sequence"]) + 1
         new_revision_id = revision_id(doc_id, sequence)
@@ -374,7 +438,7 @@ def normalize_replace_current(
             parent_revision_id=current_revision_id,
             new_revision_id=new_revision_id,
         )
-        reindex_document_fts(connection, paths.root, doc_id)
+        reindex_document_fts(connection, paths.root, doc_id, trigger="normalize_replace")
         if config.features.embedding:
             _mark_doc_embeddings_stale(connection, doc_id)
         _finish_output_run(
@@ -400,14 +464,16 @@ def normalize_replace_current(
             promotion_status="promoted",
         )
     except Exception as exc:
+        failure_evidence: ArchivedEvidence | None = None
         try:
-            _persist_failure_evidence(
+            failure_evidence = _persist_failure_evidence(
                 connection,
                 paths,
                 output_run_id,
                 transition_config,
                 body,
                 invocation=invocation,
+                provider_run_id=provider_run.provider_run_id,
             )
         except Exception:
             pass
@@ -429,13 +495,46 @@ def normalize_replace_current(
                 """,
                 (utc_now_iso(), created_id),
             )
+        _restore_failed_normalize_current_state(
+            connection,
+            paths.root,
+            doc_id=doc_id,
+            previous_revision_id=current_revision_id,
+            previous_markdown_path=str(revision["markdown_path"]),
+            created_revision_id=created_id,
+        )
         _finish_output_run(connection, output_run_id, status="failed")
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status="failed",
+            evidence_status="copied" if failure_evidence else "pending",
+            provider_job_id=output_run_id,
+            manifest_artifact_ref=_artifact_ref_from_archived(
+                failure_evidence.manifest_path if failure_evidence else None,
+                provider_run_id=provider_run.provider_run_id,
+                kind="manifest",
+                role="manifest",
+            ),
+            trace_artifact_ref=_artifact_ref_from_archived(
+                failure_evidence.trace_path if failure_evidence else None,
+                provider_run_id=provider_run.provider_run_id,
+                kind="trace",
+                role="trace",
+            ),
+            warning_count=0,
+            error_count=1,
+            primary_error_code=map_provider_error_code("transition", type(exc).__name__),
+            provider_error_code=type(exc).__name__,
+            provider_error={"code": type(exc).__name__, "message": str(exc), "raw": True},
+        )
         record_error(
             connection,
             component="transition_output",
             error_type=type(exc).__name__,
             message=str(exc),
             task_id=task_id,
+            provider_run_id=provider_run.provider_run_id,
             severity="error",
         )
         finish_task(connection, task_id, "failed", error_data={"message": str(exc), "doc_id": doc_id})
@@ -490,6 +589,36 @@ def _run_export(
         input_archived=input_archived,
     )
     transition_config = load_transition_config(paths.root / config.output.config_path)
+    binding = get_binding("indbase.output.export")
+    provider_run = create_provider_run(
+        connection,
+        paths,
+        provider_id=binding.provider,
+        provider_package="transition",
+        provider_version=TRANSITION_PIN_COMMIT,
+        capability_id=binding.provider_capability,
+        transport_profile=binding.profile,
+        task_id=task_id,
+        output_run_id=output_run_id,
+        input_sha256=hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+        metadata={"mode": mode, "input_kind": input_kind, "input_id": input_id},
+    )
+    attach_provider_run_to_output(
+        connection,
+        output_run_id=output_run_id,
+        provider_run_id=provider_run.provider_run_id,
+    )
+    add_task_event(
+        connection,
+        task_id,
+        "provider_run_created",
+        "Created transition provider run for export.",
+        payload={
+            "provider_run_id": provider_run.provider_run_id,
+            "operation_id": provider_run.operation_id,
+            "capability_id": binding.provider_capability,
+        },
+    )
     invocation: BridgeInvocation | None = None
     try:
         protected = spans_for_export_markdown(markdown, input_kind=input_kind)
@@ -514,6 +643,7 @@ def _run_export(
                 transition_config,
                 markdown,
                 invocation=invocation,
+                provider_run_id=provider_run.provider_run_id,
             )
             raise TransitionBridgeError(invocation.error or "transition_export_failed")
         validation_errors = validate_protected_spans(markdown, response.normalized_markdown, protected)
@@ -525,17 +655,19 @@ def _run_export(
                 transition_config,
                 markdown,
                 invocation=invocation,
+                provider_run_id=provider_run.provider_run_id,
             )
             raise TransitionBridgeError(
                 "; ".join(validation_errors or list(response.errors) or ["normalized_export_failed"])
             )
-        _persist_bridge_evidence(
+        archived = _persist_bridge_evidence(
             connection,
             paths,
             output_run_id,
             response,
             transition_config,
             input_markdown=markdown,
+            provider_run_id=provider_run.provider_run_id,
         )
         export_dir = paths.output_run_export_dir(output_run_id)
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -548,6 +680,8 @@ def _run_export(
             rel_path=paths.relative_to_vault(normalized_path),
             sha256=hash_markdown(response.normalized_markdown),
             status="succeeded",
+            artifact_role="normalized_markdown",
+            trust_level="derived_candidate",
         )
         for target in clean_targets:
             result = next((item for item in response.targets if item.format == target), None)
@@ -565,8 +699,44 @@ def _run_export(
                 sha256=sha,
                 status=status,
                 error=result.error if result else "target_missing",
+                artifact_role="export_output",
+                trust_level="derived_output",
             )
         final_status = _export_status(response, clean_targets)
+        failed_targets = [target for target in response.targets if target.status != "succeeded"]
+        provider_status = "partial" if final_status == "partial" or failed_targets else "success"
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status=provider_status,
+            evidence_status="copied",
+            provider_job_id=output_run_id,
+            manifest_artifact_ref=_artifact_ref_from_archived(
+                archived.manifest_path,
+                provider_run_id=provider_run.provider_run_id,
+                kind="manifest",
+                role="manifest",
+            ),
+            trace_artifact_ref=_artifact_ref_from_archived(
+                archived.trace_path,
+                provider_run_id=provider_run.provider_run_id,
+                kind="trace",
+                role="trace",
+            ),
+            warning_count=len(failed_targets),
+            error_count=len(failed_targets),
+            primary_error_code=(
+                map_provider_error_code("transition", failed_targets[0].error, partial=True)
+                if failed_targets
+                else None
+            ),
+            provider_error_code=failed_targets[0].error if failed_targets else None,
+            provider_error=(
+                {"code": failed_targets[0].error or "target_failed", "message": failed_targets[0].format}
+                if failed_targets
+                else None
+            ),
+        )
         _write_output_sources(connection, output_run_id, output_sources)
         _finish_output_run(
             connection,
@@ -589,24 +759,51 @@ def _run_export(
             warnings=warnings,
         )
     except Exception as exc:
+        failure_evidence: ArchivedEvidence | None = None
         try:
-            _persist_failure_evidence(
+            failure_evidence = _persist_failure_evidence(
                 connection,
                 paths,
                 output_run_id,
                 transition_config,
                 markdown,
                 invocation=invocation,
+                provider_run_id=provider_run.provider_run_id,
             )
         except Exception:
             pass
         _finish_output_run(connection, output_run_id, status="failed")
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status="failed",
+            evidence_status="copied" if failure_evidence else "pending",
+            provider_job_id=output_run_id,
+            manifest_artifact_ref=_artifact_ref_from_archived(
+                failure_evidence.manifest_path if failure_evidence else None,
+                provider_run_id=provider_run.provider_run_id,
+                kind="manifest",
+                role="manifest",
+            ),
+            trace_artifact_ref=_artifact_ref_from_archived(
+                failure_evidence.trace_path if failure_evidence else None,
+                provider_run_id=provider_run.provider_run_id,
+                kind="trace",
+                role="trace",
+            ),
+            warning_count=0,
+            error_count=1,
+            primary_error_code=map_provider_error_code("transition", type(exc).__name__),
+            provider_error_code=type(exc).__name__,
+            provider_error={"code": type(exc).__name__, "message": str(exc), "raw": True},
+        )
         record_error(
             connection,
             component="transition_output",
             error_type=type(exc).__name__,
             message=str(exc),
             task_id=task_id,
+            provider_run_id=provider_run.provider_run_id,
             severity="error",
         )
         finish_task(connection, task_id, "failed", error_data={"message": str(exc)})
@@ -654,9 +851,10 @@ def _persist_failure_evidence(
     input_markdown: str,
     *,
     invocation: BridgeInvocation | None,
-) -> None:
+    provider_run_id: str | None = None,
+) -> ArchivedEvidence | None:
     if invocation is None:
-        return
+        return None
     archived = archive_partial_evidence(
         paths,
         output_run_id,
@@ -664,9 +862,10 @@ def _persist_failure_evidence(
         input_markdown,
         response=invocation.response,
         job_dir=invocation.job_dir,
+        provider_run_id=provider_run_id,
     )
     if archived is None:
-        return
+        return None
     now = utc_now_iso()
     connection.execute(
         """
@@ -687,6 +886,7 @@ def _persist_failure_evidence(
             output_run_id,
         ),
     )
+    return archived
 
 
 def _write_normalized_revision(
@@ -750,6 +950,62 @@ def _write_normalized_revision(
     return type("Written", (), {"markdown_path": rel_path, "revision_id": new_revision_id})()
 
 
+def _restore_failed_normalize_current_state(
+    connection: sqlite3.Connection,
+    vault_path: Path,
+    *,
+    doc_id: str,
+    previous_revision_id: str,
+    previous_markdown_path: str,
+    created_revision_id: str | None,
+) -> None:
+    now = utc_now_iso()
+    connection.execute(
+        """
+        UPDATE documents
+        SET current_revision_id = ?, canonical_path = ?, updated_at = ?
+        WHERE doc_id = ?
+        """,
+        (previous_revision_id, previous_markdown_path, now, doc_id),
+    )
+    connection.execute(
+        """
+        UPDATE document_revisions
+        SET promotion_status = 'promoted', updated_at = ?
+        WHERE revision_id = ?
+        """,
+        (now, previous_revision_id),
+    )
+    if created_revision_id:
+        connection.execute(
+            """
+            UPDATE document_revisions
+            SET promotion_status = 'never_promoted', updated_at = ?
+            WHERE revision_id = ?
+            """,
+            (now, created_revision_id),
+        )
+        connection.execute(
+            "UPDATE chunks SET is_current = 0, updated_at = ? WHERE revision_id = ?",
+            (now, created_revision_id),
+        )
+    connection.execute(
+        """
+        UPDATE chunks
+        SET is_current = CASE WHEN revision_id = ? THEN 1 ELSE 0 END,
+            updated_at = ?
+        WHERE doc_id = ?
+        """,
+        (previous_revision_id, now, doc_id),
+    )
+    try:
+        reindex_document_fts(connection, vault_path, doc_id, trigger="normalize_replace_rollback")
+    except Exception:
+        # Failure reporting below still records the provider/output error. Keep
+        # current pointer restored even if index repair cannot complete.
+        pass
+
+
 def _insert_output_run(
     connection: sqlite3.Connection,
     *,
@@ -802,13 +1058,15 @@ def _persist_bridge_evidence(
     transition_config: dict[str, object],
     *,
     input_markdown: str,
-) -> None:
+    provider_run_id: str | None = None,
+) -> ArchivedEvidence:
     archived = archive_transition_evidence(
         paths,
         output_run_id,
         response,
         transition_config=transition_config,
         input_markdown=input_markdown,
+        provider_run_id=provider_run_id,
     )
     now = utc_now_iso()
     connection.execute(
@@ -829,6 +1087,25 @@ def _persist_bridge_evidence(
             now,
             output_run_id,
         ),
+    )
+    return archived
+
+
+def _artifact_ref_from_archived(
+    rel_path: str | None,
+    *,
+    provider_run_id: str,
+    kind: str,
+    role: str,
+) -> ArtifactRef | None:
+    if not rel_path:
+        return None
+    return ArtifactRef(
+        kind=kind,
+        vault_path=rel_path,
+        indbase_uri=provider_evidence_indbase_uri(provider_run_id),
+        trust_level=ArtifactTrustLevel.EVIDENCE,
+        role=role,
     )
 
 
@@ -864,14 +1141,16 @@ def _record_artifact(
     sha256: str | None,
     status: str,
     error: str | None = None,
+    artifact_role: str | None = None,
+    trust_level: str | None = None,
 ) -> None:
     now = utc_now_iso()
     connection.execute(
         """
         INSERT INTO output_artifacts (
           output_artifact_id, output_run_id, format, path, sha256, status, error_json,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          artifact_role, trust_level, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             new_prefixed_id("outart"),
@@ -881,6 +1160,8 @@ def _record_artifact(
             sha256,
             status,
             json.dumps({"message": error}) if error else None,
+            artifact_role,
+            trust_level,
             now,
             now,
         ),

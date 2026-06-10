@@ -1,0 +1,2 @@
+{"suite":"v035_retrieval_regression","name":"provider reliability note","query":"provider failure class evidence completeness","options":{"mode":"fts","top_k":5},"expect":{"expected_quote_contains":["provider failure class evidence completeness"],"min_result_count":1}}
+{"suite":"v035_retrieval_regression","name":"source lineage cjk","query":"鐭ヨ瘑 鐐瑰嚮 lineage","options":{"mode":"fts","top_k":5},"expect":{"expected_quote_contains":["鐭ヨ瘑 鐐瑰嚮 lineage"],"min_result_count":1}}

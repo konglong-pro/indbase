@@ -122,6 +122,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+consoler-agent = [
+    { name = "consoler-agent-sdk", version = "0.1.0", source = { registry = "https://pypi.org/simple" } },
+]
 swallow = [
     { name = "swallow" },
 ]
@@ -138,6 +141,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "consoler-agent-sdk", marker = "extra == 'consoler-agent'", specifier = "==0.1.0" },
     { name = "inquirerpy", specifier = ">=0.3.4" },
     { name = "markdownify", marker = "extra == 'swallow-playwright'", specifier = ">=0.14" },
     { name = "playwright", marker = "extra == 'swallow-playwright'", specifier = ">=1.52" },
@@ -146,10 +150,15 @@ requires-dist = [
     { name = "swallow", marker = "extra == 'swallow-playwright'", git = "https://github.com/konglong-pro/swallow.git?rev=f0f7fa80c0f7f5959d1d325bb5c3eb9b32082a1d" },
     { name = "typer", specifier = ">=0.15" },
 ]
-provides-extras = ["swallow", "swallow-playwright"]
+provides-extras = ["consoler-agent", "swallow", "swallow-playwright"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3" }]
+
+[[package]]
+name = "consoler-agent-sdk"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
 
 [[package]]
 name = "iniconfig"

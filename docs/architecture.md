@@ -33,10 +33,12 @@
 src/indbase_core/     # Durable services (ingest, revisions, chunker, indexer, doctor, …)
 src/indbase_cli/      # Typer CLI (`indb`)
 src/indbase_core/migrations/   # SQLite schema versions
-scripts/              # Release gates and historical MVP gate scripts
-tests/                # Pytest (232 tests)
-docs/planning/        # Active specs; archive/ for historical checkpoints
-docs/agents/          # Agent implementation guides for v0.2
+scripts/              # Release gates and doc lifecycle checks
+tests/                # Pytest suite and fixtures
+docs/active/          # Current active work projection
+docs/contracts/       # Durable trust and interface contracts
+docs/planning/        # Lifecycle-managed plans
+docs/agents/          # Current and archived agent guides
 ```
 
 ## Key v0.2 modules
@@ -60,7 +62,12 @@ Hybrid/vector modes exist for MVP M7 features when enabled in config.
 
 ## Further reading
 
+- [active/current.md](active/current.md) - current active work
+- [phase-manifest.yaml](phase-manifest.yaml) - machine-readable phase state
+- [project-status.md](project-status.md) - shipped scope
+- [contracts/trust-boundary.md](contracts/trust-boundary.md)
+
 - [project-status.md](project-status.md) — shipped scope
-- [planning/mvp-v0.1-spec.md](planning/mvp-v0.1-spec.md)
-- [planning/v0.2-swallow-ingest-integration.md](planning/v0.2-swallow-ingest-integration.md)
-- [planning/v0.2-transition-output-integration.md](planning/v0.2-transition-output-integration.md)
+- [planning/archive/v0.1/mvp-v0.1-spec.plan.md](planning/archive/v0.1/mvp-v0.1-spec.plan.md)
+- [planning/archive/v0.2/swallow-ingest-integration.plan.md](planning/archive/v0.2/swallow-ingest-integration.plan.md)
+- [planning/archive/v0.2/transition-output-integration.plan.md](planning/archive/v0.2/transition-output-integration.plan.md)

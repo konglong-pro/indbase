@@ -160,6 +160,9 @@ class VaultPaths:
     def output_run_evidence_dir(self, output_run_id: str) -> Path:
         return self.artifacts / "output_runs" / output_run_id
 
+    def provider_run_evidence_dir(self, provider_run_id: str) -> Path:
+        return self.artifacts / "provider_runs" / provider_run_id
+
     def relative_to_vault(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
 

@@ -6,14 +6,28 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-import shutil
 import sqlite3
 
+from indbase_core.artifacts.evidence import ArtifactRef, ArtifactTrustLevel
+from indbase_core.artifacts.evidence_store import (
+    copy_artifact_to_provider_evidence,
+    write_json_artifact_to_provider_evidence,
+    write_provider_evidence_index,
+    write_text_artifact_to_provider_evidence,
+)
+from indbase_core.capabilities.registry import get_binding
 from indbase_core.config import IndbaseConfig, default_config, load_config
 from indbase_core.errors import record_error
 from indbase_core.ids import new_prefixed_id
 from indbase_core.paths import VaultPaths, vault_paths
 from indbase_core.promotion_policy import evaluate_swallow_promotion
+from indbase_core.provider_runs import (
+    attach_provider_run_to_converter,
+    attach_provider_run_to_ingest,
+    create_provider_run,
+    finish_provider_run,
+    map_provider_error_code,
+)
 from indbase_core.reviews import create_review_item
 from indbase_core.swallow_adapter import (
     ConversionCandidate,
@@ -49,6 +63,13 @@ class ConversionBatchResult:
     failed_items: int
 
 
+@dataclass(frozen=True)
+class SwallowProviderEvidenceCopy:
+    archived_artifacts: tuple[str, ...]
+    manifest: ArtifactRef | None
+    trace: ArtifactRef | None
+
+
 def convert_archived_sources(
     connection: sqlite3.Connection,
     vault_path: Path | str,
@@ -58,8 +79,9 @@ def convert_archived_sources(
     indbase_config = _load_indbase_config_if_present(paths)
     rows = connection.execute(
         """
-        SELECT ii.ingest_item_id, ii.doc_id, ii.source_uri, sf.source_file_id, sf.original_ext,
-               sf.source_hash, sf.original_path
+        SELECT ii.ingest_id, ii.ingest_item_id, ii.doc_id, ii.source_uri,
+               ir.task_id, sf.source_file_id, sf.original_ext, sf.source_hash,
+               sf.original_path
         FROM ingest_items ii
         JOIN ingest_runs ir ON ir.ingest_id = ii.ingest_id
         JOIN documents d ON d.doc_id = ii.doc_id
@@ -133,19 +155,93 @@ def _convert_one_with_swallow(
     indbase_config: IndbaseConfig,
     now: str,
 ) -> ConvertedSource | None:
-    adapter = SwallowIngestAdapter(vault_path=paths.root, config=indbase_config.ingest.swallow)
     source_type = str(row["original_ext"] or "").lower()
-    candidate = adapter.convert_url(row["source_uri"]) if source_type == "url" else adapter.convert_file(original_path)
-    if not candidate.markdown_body.strip():
-        raise NoExtractableContentError("No extractable content after swallow conversion.")
+    binding = get_binding("indbase.ingest.url" if source_type == "url" else "indbase.ingest.file")
+    provider_run = create_provider_run(
+        connection,
+        paths,
+        provider_id=binding.provider,
+        provider_package="swallow",
+        provider_version="unknown",
+        capability_id=binding.provider_capability,
+        transport_profile=binding.profile,
+        task_id=str(row["task_id"]) if row["task_id"] else None,
+        ingest_run_id=str(row["ingest_id"]) if row["ingest_id"] else None,
+        input_sha256=str(row["source_hash"]) if row["source_hash"] else None,
+        metadata={
+            "ingest_item_id": row["ingest_item_id"],
+            "doc_id": row["doc_id"],
+            "source_type": source_type,
+        },
+    )
+    if row["ingest_id"]:
+        attach_provider_run_to_ingest(
+            connection,
+            ingest_run_id=str(row["ingest_id"]),
+            provider_run_id=provider_run.provider_run_id,
+        )
+    adapter = SwallowIngestAdapter(vault_path=paths.root, config=indbase_config.ingest.swallow)
+    try:
+        candidate = adapter.convert_url(row["source_uri"]) if source_type == "url" else adapter.convert_file(original_path)
+        if not candidate.markdown_body.strip():
+            raise NoExtractableContentError("No extractable content after swallow conversion.")
+    except Exception as exc:
+        provider_code = _provider_code_from_exception(exc)
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status="failed",
+            evidence_status="pending",
+            warning_count=0,
+            error_count=1,
+            primary_error_code=map_provider_error_code("swallow", provider_code),
+            provider_error_code=provider_code,
+            provider_error={"code": provider_code, "message": str(exc), "raw": True},
+        )
+        setattr(exc, "indbase_provider_run_id", provider_run.provider_run_id)
+        raise
 
     output_hash = hash_markdown(candidate.markdown_body)
     quality_signals = candidate_to_quality_signals(candidate) | {
         "text_length": len(candidate.markdown_body),
         "empty": len(candidate.markdown_body.strip()) == 0,
     }
+    evidence = _archive_swallow_provider_evidence(
+        paths,
+        provider_run_id=provider_run.provider_run_id,
+        candidate=candidate,
+        row=row,
+        output_hash=output_hash,
+    )
     if _current_revision_content_hash(connection, row["doc_id"]) == output_hash:
-        _mark_no_content_change_with_swallow(connection, row, candidate, output_hash, quality_signals, now)
+        converter_run_id = _mark_no_content_change_with_swallow(
+            connection,
+            row,
+            candidate,
+            output_hash,
+            quality_signals,
+            now,
+            provider_run_id=provider_run.provider_run_id,
+        )
+        attach_provider_run_to_converter(
+            connection,
+            converter_run_id=converter_run_id,
+            provider_run_id=provider_run.provider_run_id,
+        )
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status="success",
+            evidence_status="copied",
+            provider_job_id=_candidate_provider_job_id(candidate),
+            provider_version=_candidate_provider_version(candidate),
+            manifest_artifact_ref=evidence.manifest,
+            trace_artifact_ref=evidence.trace,
+            warning_count=len(candidate.warnings),
+            error_count=len(candidate.errors),
+            provider_error_code=candidate.errors[0] if candidate.errors else None,
+            metadata={"promotion_status": "skipped_no_content_change"},
+        )
         return None
 
     converter_run_id = new_prefixed_id("converter_run")
@@ -153,7 +249,7 @@ def _convert_one_with_swallow(
     candidate_path.parent.mkdir(parents=True, exist_ok=True)
     candidate_path.write_text(candidate.markdown_body, encoding="utf-8")
     candidate_rel = paths.relative_to_vault(candidate_path)
-    archived_artifacts = _archive_required_artifacts(paths, row["doc_id"], converter_run_id, candidate)
+    archived_artifacts = evidence.archived_artifacts
     source_snapshot_path = _archived_source_snapshot_path(candidate, archived_artifacts)
     quality_signals = _quality_signals_with_durable_locator_paths(
         quality_signals,
@@ -166,8 +262,24 @@ def _convert_one_with_swallow(
     if decision == "failed":
         if candidate_path.exists():
             candidate_path.unlink()
-        shutil.rmtree(paths.artifact_dir(row["doc_id"], converter_run_id), ignore_errors=True)
-        raise NoExtractableContentError(promotion_reason)
+        exc = NoExtractableContentError(promotion_reason)
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status="success",
+            evidence_status="copied",
+            provider_job_id=_candidate_provider_job_id(candidate),
+            provider_version=_candidate_provider_version(candidate),
+            manifest_artifact_ref=evidence.manifest,
+            trace_artifact_ref=evidence.trace,
+            warning_count=len(candidate.warnings),
+            error_count=len(candidate.errors),
+            primary_error_code="provider_quality_rejected",
+            provider_error_code=candidate.errors[0] if candidate.errors else None,
+            metadata={"promotion_status": decision, "promotion_reason": promotion_reason},
+        )
+        setattr(exc, "indbase_provider_run_id", provider_run.provider_run_id)
+        raise exc
     status = "succeeded" if decision == "trusted-current" else "pending_review"
     provenance = candidate.provenance
 
@@ -179,10 +291,11 @@ def _convert_one_with_swallow(
           started_at, finished_at, created_at, updated_at,
           external_job_id, external_trace_path, external_manifest_path,
           primary_worker, worker_chain_json, candidate_path,
-          artifact_manifest_json, promotion_status, promotion_reason
+          artifact_manifest_json, promotion_status, promotion_reason,
+          adopted_provider_run_id
         )
         VALUES (?, ?, NULL, 'swallow', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             converter_run_id,
@@ -206,7 +319,13 @@ def _convert_one_with_swallow(
             artifact_manifest_json(candidate, archived_artifacts),
             decision,
             promotion_reason,
+            provider_run.provider_run_id,
         ),
+    )
+    attach_provider_run_to_converter(
+        connection,
+        converter_run_id=converter_run_id,
+        provider_run_id=provider_run.provider_run_id,
     )
     connection.execute(
         """
@@ -266,8 +385,40 @@ def _convert_one_with_swallow(
             target_id=converter_run_id,
             reason=promotion_reason,
             priority=40,
+            ingest_run_id=str(row["ingest_id"]) if row["ingest_id"] else None,
+            provider_run_id=provider_run.provider_run_id,
+        )
+        finish_provider_run(
+            connection,
+            provider_run.provider_run_id,
+            provider_status="success",
+            evidence_status="copied",
+            provider_job_id=_candidate_provider_job_id(candidate),
+            provider_version=_candidate_provider_version(candidate),
+            manifest_artifact_ref=evidence.manifest,
+            trace_artifact_ref=evidence.trace,
+            warning_count=len(candidate.warnings),
+            error_count=len(candidate.errors),
+            primary_error_code="provider_quality_rejected",
+            provider_error_code=candidate.errors[0] if candidate.errors else None,
+            metadata={"promotion_status": decision, "promotion_reason": promotion_reason},
         )
         return None
+
+    finish_provider_run(
+        connection,
+        provider_run.provider_run_id,
+        provider_status="success",
+        evidence_status="copied",
+        provider_job_id=_candidate_provider_job_id(candidate),
+        provider_version=_candidate_provider_version(candidate),
+        manifest_artifact_ref=evidence.manifest,
+        trace_artifact_ref=evidence.trace,
+        warning_count=len(candidate.warnings),
+        error_count=len(candidate.errors),
+        provider_error_code=candidate.errors[0] if candidate.errors else None,
+        metadata={"promotion_status": decision, "promotion_reason": promotion_reason},
+    )
 
     return ConvertedSource(
         ingest_item_id=row["ingest_item_id"],
@@ -302,7 +453,8 @@ def _mark_no_content_change_with_swallow(
     output_hash: str,
     quality_signals: dict[str, object],
     now: str,
-) -> None:
+    provider_run_id: str | None = None,
+) -> str:
     converter_run_id = new_prefixed_id("converter_run")
     provenance = candidate.provenance
     connection.execute(
@@ -312,10 +464,11 @@ def _mark_no_content_change_with_swallow(
           input_hash, output_hash, warnings_json, quality_signals_json, status,
           started_at, finished_at, created_at, updated_at,
           external_job_id, external_trace_path, external_manifest_path,
-          primary_worker, worker_chain_json, promotion_status, promotion_reason
+          primary_worker, worker_chain_json, promotion_status, promotion_reason,
+          adopted_provider_run_id
         )
         VALUES (?, ?, NULL, 'swallow', ?, ?, ?, ?, ?, 'skipped_no_content_change',
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, 'skipped_no_content_change', ?)
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, 'skipped_no_content_change', ?, ?)
         """,
         (
             converter_run_id,
@@ -335,6 +488,7 @@ def _mark_no_content_change_with_swallow(
             provenance.primary_worker if provenance else None,
             _json(list(provenance.worker_chain) if provenance else []),
             "Output matches the current revision content hash.",
+            provider_run_id,
         ),
     )
     connection.execute(
@@ -361,6 +515,7 @@ def _mark_no_content_change_with_swallow(
         """,
         (now, now, row["ingest_item_id"]),
     )
+    return converter_run_id
 
 
 def _mark_conversion_failed(
@@ -374,11 +529,13 @@ def _mark_conversion_failed(
     doc_id = str(row["doc_id"])
     source_type = str(row["original_ext"] or "").lower()
     converter_name = converter_name_override or "swallow"
+    provider_run_id = getattr(exc, "indbase_provider_run_id", None)
     error_id = record_error(
         connection,
         component="conversion",
         error_type=_conversion_error_type(exc),
         message=str(exc),
+        provider_run_id=str(provider_run_id) if provider_run_id else None,
         user_message="Failed to convert source into Markdown with swallow.",
         retryable=False,
         payload={
@@ -427,9 +584,9 @@ def _mark_conversion_failed(
         INSERT INTO converter_runs(
           converter_run_id, doc_id, revision_id, converter_name, converter_version,
           input_hash, output_hash, warnings_json, quality_signals_json, status,
-          started_at, finished_at, created_at, updated_at
+          started_at, finished_at, created_at, updated_at, adopted_provider_run_id
         )
-        VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, ?, 'failed', ?, ?, ?, ?)
+        VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, ?, 'failed', ?, ?, ?, ?, ?)
         """,
         (
             converter_run_id,
@@ -443,8 +600,15 @@ def _mark_conversion_failed(
             now,
             now,
             now,
+            str(provider_run_id) if provider_run_id else None,
         ),
     )
+    if provider_run_id:
+        attach_provider_run_to_converter(
+            connection,
+            converter_run_id=converter_run_id,
+            provider_run_id=str(provider_run_id),
+        )
     create_review_item(
         connection,
         review_type="conversion_low_quality",
@@ -452,6 +616,8 @@ def _mark_conversion_failed(
         target_id=converter_run_id,
         reason=f"Conversion failed for .{source_type}: {exc}",
         priority=40,
+        ingest_run_id=str(row["ingest_id"]) if row["ingest_id"] else None,
+        provider_run_id=str(provider_run_id) if provider_run_id else None,
     )
 
 
@@ -461,25 +627,176 @@ def _conversion_error_type(exc: Exception) -> str:
     return type(exc).__name__
 
 
-def _archive_required_artifacts(
+def _archive_swallow_provider_evidence(
     paths: VaultPaths,
-    doc_id: str,
-    converter_run_id: str,
+    *,
+    provider_run_id: str,
     candidate: ConversionCandidate,
-) -> tuple[str, ...]:
+    row: sqlite3.Row,
+    output_hash: str,
+) -> SwallowProviderEvidenceCopy:
+    artifacts: list[ArtifactRef] = []
+    candidate_ref = write_text_artifact_to_provider_evidence(
+        paths,
+        provider_run_id=provider_run_id,
+        destination_name="document.md",
+        text=candidate.markdown_body,
+        kind="markdown",
+        role="candidate_markdown",
+        trust_level=ArtifactTrustLevel.CONVERSION_CANDIDATE,
+    )
+    artifacts.append(candidate_ref)
+    raw_meta_ref = write_json_artifact_to_provider_evidence(
+        paths,
+        provider_run_id=provider_run_id,
+        destination_name="raw.meta.json",
+        payload={
+            "source_uri": row["source_uri"],
+            "source_hash": row["source_hash"],
+            "original_path": row["original_path"],
+            "output_hash": output_hash,
+            "candidate_status": candidate.status,
+            "quality_score": candidate.quality_score,
+        },
+        kind="raw_metadata",
+        role="raw_metadata",
+    )
+    artifacts.append(raw_meta_ref)
+    provenance = candidate.provenance
+    manifest_ref = _copy_swallow_artifact_ref(
+        paths,
+        provider_run_id=provider_run_id,
+        artifact_path=provenance.manifest_path if provenance else None,
+        destination_name="manifest.json",
+        kind="manifest",
+        role="manifest",
+    )
+    trace_ref = _copy_swallow_artifact_ref(
+        paths,
+        provider_run_id=provider_run_id,
+        artifact_path=provenance.trace_path if provenance else None,
+        destination_name="trace.jsonl",
+        kind="trace",
+        role="trace",
+    )
+    ingest_document_ref = _copy_swallow_artifact_ref(
+        paths,
+        provider_run_id=provider_run_id,
+        artifact_path=provenance.ingest_document_path if provenance else None,
+        destination_name="ingest_document.json",
+        kind="ingest_document",
+        role="ingest_document",
+    )
+    for ref in (manifest_ref, trace_ref, ingest_document_ref):
+        if ref is not None:
+            artifacts.append(ref)
+
     archived: list[str] = []
-    artifact_dir = paths.artifact_dir(doc_id, converter_run_id)
+    intermediate_refs: list[ArtifactRef] = []
+    required_ref_by_provider_path = {
+        str(path): ref
+        for path, ref in (
+            (provenance.manifest_path if provenance else None, manifest_ref),
+            (provenance.trace_path if provenance else None, trace_ref),
+            (provenance.ingest_document_path if provenance else None, ingest_document_ref),
+        )
+        if path and ref is not None and ref.vault_path
+    }
     for artifact in candidate.artifact_manifest.required:
-        source = Path(artifact)
-        if not source.is_absolute():
-            source = paths.swallow_cache / artifact
-        if not source.is_file():
+        existing_ref = required_ref_by_provider_path.get(str(artifact))
+        if existing_ref is not None:
+            archived.append(str(existing_ref.vault_path))
             continue
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        target = _available_artifact_path(artifact_dir, source.name)
-        shutil.copy2(source, target)
-        archived.append(paths.relative_to_vault(target))
-    return tuple(archived)
+        source = _swallow_artifact_source(paths, artifact)
+        if source is None:
+            continue
+        ref = copy_artifact_to_provider_evidence(
+            paths,
+            provider_run_id=provider_run_id,
+            source=source,
+            destination_name=source.name,
+            kind="intermediate",
+            role="intermediate_artifact",
+        )
+        if ref is None:
+            continue
+        archived.append(str(ref.vault_path))
+        intermediate_refs.append(ref)
+    artifacts.extend(intermediate_refs)
+    write_provider_evidence_index(
+        paths,
+        provider_run_id=provider_run_id,
+        provider={
+            "provider_id": "swallow",
+            "provider_version": _candidate_provider_version(candidate),
+            "provider_job_id": _candidate_provider_job_id(candidate),
+        },
+        artifacts=artifacts,
+        manifest=manifest_ref,
+        trace=trace_ref,
+    )
+    return SwallowProviderEvidenceCopy(
+        archived_artifacts=tuple(archived),
+        manifest=manifest_ref,
+        trace=trace_ref,
+    )
+
+
+def _copy_swallow_artifact_ref(
+    paths: VaultPaths,
+    *,
+    provider_run_id: str,
+    artifact_path: str | None,
+    destination_name: str,
+    kind: str,
+    role: str,
+) -> ArtifactRef | None:
+    source = _swallow_artifact_source(paths, artifact_path)
+    if source is None:
+        return None
+    return copy_artifact_to_provider_evidence(
+        paths,
+        provider_run_id=provider_run_id,
+        source=source,
+        destination_name=destination_name,
+        kind=kind,
+        role=role,
+    )
+
+
+def _swallow_artifact_source(paths: VaultPaths, artifact_path: str | Path | None) -> Path | None:
+    if not artifact_path:
+        return None
+    source = Path(artifact_path)
+    if source.is_file():
+        return source
+    if not source.is_absolute():
+        swallow_candidate = paths.swallow_cache / source
+        if swallow_candidate.is_file():
+            return swallow_candidate
+        vault_candidate = paths.root / source
+        if vault_candidate.is_file():
+            return vault_candidate
+    return None
+
+
+def _candidate_provider_job_id(candidate: ConversionCandidate) -> str | None:
+    return candidate.provenance.swallow_job_id if candidate.provenance else None
+
+
+def _candidate_provider_version(candidate: ConversionCandidate) -> str:
+    return candidate.provenance.swallow_version if candidate.provenance else "unknown"
+
+
+def _provider_code_from_exception(exc: Exception) -> str:
+    explicit = getattr(exc, "code", None) or getattr(exc, "error_code", None)
+    if explicit:
+        return str(explicit)
+    message = str(exc).strip()
+    compact = message.replace("_", "").replace("-", "")
+    if message and compact.isalnum() and message.upper() == message:
+        return message
+    return type(exc).__name__
 
 
 def _archived_source_snapshot_path(candidate: ConversionCandidate, archived_artifacts: tuple[str, ...]) -> str | None:
@@ -541,20 +858,6 @@ def _quality_status_for_swallow_decision(decision: str, candidate: ConversionCan
     if decision != "trusted-current":
         return "warning"
     return "warning" if candidate.warnings else "passed"
-
-
-def _available_artifact_path(directory: Path, filename: str) -> Path:
-    candidate = directory / filename
-    if not candidate.exists():
-        return candidate
-    stem = candidate.stem
-    suffix = candidate.suffix
-    index = 2
-    while True:
-        next_candidate = directory / f"{stem}-{index}{suffix}"
-        if not next_candidate.exists():
-            return next_candidate
-        index += 1
 
 
 def _swallow_promotion_decision(

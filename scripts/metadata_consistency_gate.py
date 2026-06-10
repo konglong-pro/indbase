@@ -63,7 +63,7 @@ def main() -> None:
             ).fetchone()
             return None if row is None else (str(row[0] or ""), str(row[1] or ""))
 
-    run_indb(0, "init", str(vault), "--category-template", "minimal")
+    run_indb(0, "init", str(vault), "--category-template", "indbase_default_v1")
     run_indb(0, "ingest", str(source), "--vault", str(vault))
 
     with sqlite3.connect(vault / ".indbase" / "db.sqlite") as connection:

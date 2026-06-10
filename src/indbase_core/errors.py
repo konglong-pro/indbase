@@ -16,6 +16,7 @@ def record_error(
     error_type: str,
     message: str,
     task_id: str | None = None,
+    provider_run_id: str | None = None,
     severity: str = "error",
     retryable: bool = False,
     user_message: str | None = None,
@@ -26,14 +27,15 @@ def record_error(
     connection.execute(
         """
         INSERT INTO errors(
-          error_id, task_id, component, error_type, severity, retryable,
+          error_id, task_id, provider_run_id, component, error_type, severity, retryable,
           user_message, developer_message, message, payload_json, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             error_id,
             task_id,
+            provider_run_id,
             component,
             error_type,
             severity,
@@ -70,7 +72,7 @@ def list_errors(
     return list(
         connection.execute(
             f"""
-            SELECT error_id, task_id, component, error_type, severity, retryable,
+            SELECT error_id, task_id, provider_run_id, component, error_type, severity, retryable,
                    user_message, developer_message, message, payload_json, created_at
             FROM errors
             {where}
@@ -85,7 +87,7 @@ def list_errors(
 def get_error(connection: sqlite3.Connection, error_id: str) -> sqlite3.Row | None:
     return connection.execute(
         """
-        SELECT error_id, task_id, component, error_type, severity, retryable,
+        SELECT error_id, task_id, provider_run_id, component, error_type, severity, retryable,
                user_message, developer_message, message, stack, payload_json, created_at
         FROM errors
         WHERE error_id = ?

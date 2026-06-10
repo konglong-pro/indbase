@@ -27,7 +27,7 @@ def main() -> None:
     gate_root.mkdir(parents=True)
     corpus = stage_real_corpus(gate_root, target_files=85)
     vault = gate_root / "vault"
-    init_vault(vault, category_template="minimal")
+    init_vault(vault, category_template="indbase_default_v1")
 
     config = load_config(vault_paths(vault).config_path)
     save_config(

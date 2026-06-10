@@ -22,7 +22,7 @@ class InitResult:
     task_id: str
 
 
-def init_vault(vault_path: Path | str, category_template: str = "minimal") -> InitResult:
+def init_vault(vault_path: Path | str, category_template: str = "indbase_default_v1") -> InitResult:
     paths = vault_paths(vault_path)
     paths.ensure_layout()
 

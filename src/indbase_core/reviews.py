@@ -10,7 +10,8 @@ from indbase_core.time import utc_now_iso
 
 REVIEW_COLUMNS = """
 review_id, type, target_type, target_id, priority, reason,
-status, created_at, updated_at, resolved_at, resolution_note, resolved_by
+status, created_at, updated_at, resolved_at, resolution_note, resolved_by,
+ingest_run_id, provider_run_id
 """
 
 
@@ -22,17 +23,31 @@ def create_review_item(
     target_id: str,
     reason: str,
     priority: int = 50,
+    ingest_run_id: str | None = None,
+    provider_run_id: str | None = None,
 ) -> str:
     review_id = new_prefixed_id("review")
     now = utc_now_iso()
     connection.execute(
         """
         INSERT INTO review_items(
-          review_id, type, target_type, target_id, priority, reason, status, created_at, updated_at
+          review_id, type, target_type, target_id, priority, reason, status,
+          created_at, updated_at, ingest_run_id, provider_run_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
         """,
-        (review_id, review_type, target_type, target_id, priority, reason, now, now),
+        (
+            review_id,
+            review_type,
+            target_type,
+            target_id,
+            priority,
+            reason,
+            now,
+            now,
+            ingest_run_id,
+            provider_run_id,
+        ),
     )
     return review_id
 

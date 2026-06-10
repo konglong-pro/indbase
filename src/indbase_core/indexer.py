@@ -8,10 +8,13 @@ from pathlib import Path
 import sqlite3
 
 from indbase_core.errors import record_error
+from indbase_core.ids import new_prefixed_id
 from indbase_core.paths import vault_paths
 from indbase_core.reviews import create_review_item
 from indbase_core.search_text import build_fts_text
 from indbase_core.time import utc_now_iso
+
+SOURCE_FTS_INDEX_KIND = "source_fts"
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,12 @@ def rebuild_fts_index(connection: sqlite3.Connection, vault_path: Path | str) ->
     paths = vault_paths(vault_path)
     now = utc_now_iso()
     active_documents = _active_documents(connection)
+    index_build_id = _start_index_build(
+        connection,
+        scope="vault",
+        trigger="manual_rebuild",
+        metadata={"active_document_count": len(active_documents)},
+    )
 
     connection.execute("DELETE FROM chunks_fts")
     connection.execute(
@@ -60,6 +69,15 @@ def rebuild_fts_index(connection: sqlite3.Connection, vault_path: Path | str) ->
                     reason=validation_failure,
                 )
             )
+            _record_index_entry(
+                connection,
+                index_build_id=index_build_id,
+                doc_id=str(document["doc_id"]),
+                revision_id=str(document["current_revision_id"] or ""),
+                chunk_id=None,
+                status="failed",
+                reason=validation_failure,
+            )
             continue
 
         chunks = _current_chunks(connection, str(document["doc_id"]), str(document["current_revision_id"]))
@@ -80,6 +98,14 @@ def rebuild_fts_index(connection: sqlite3.Connection, vault_path: Path | str) ->
                     build_fts_text(document["category_name"]),
                 ),
             )
+            _record_index_entry(
+                connection,
+                index_build_id=index_build_id,
+                doc_id=str(document["doc_id"]),
+                revision_id=str(document["current_revision_id"]),
+                chunk_id=str(chunk["chunk_id"]),
+                status="indexed",
+            )
         connection.execute(
             """
             UPDATE documents
@@ -91,6 +117,17 @@ def rebuild_fts_index(connection: sqlite3.Connection, vault_path: Path | str) ->
         indexed_documents += 1
         indexed_chunks += len(chunks)
 
+    _finish_index_build(
+        connection,
+        index_build_id,
+        status="failed" if failures else "succeeded",
+        metadata={
+            "active_documents": len(active_documents),
+            "indexed_documents": indexed_documents,
+            "indexed_chunks": indexed_chunks,
+            "failed_documents": len(failures),
+        },
+    )
     connection.commit()
     return FtsRebuildResult(
         active_documents=len(active_documents),
@@ -101,9 +138,16 @@ def rebuild_fts_index(connection: sqlite3.Connection, vault_path: Path | str) ->
     )
 
 
-def reindex_document_fts(connection: sqlite3.Connection, vault_path: Path | str, doc_id: str) -> None:
+def reindex_document_fts(
+    connection: sqlite3.Connection,
+    vault_path: Path | str,
+    doc_id: str,
+    *,
+    trigger: str = "manual_reindex",
+) -> None:
     """Rebuild FTS rows for one document's current revision only."""
-    refresh_document_fts_metadata(connection, doc_id)
+    index_build_id = _start_index_build(connection, scope="document", doc_id=doc_id, trigger=trigger)
+    indexed_chunks = _refresh_document_fts_metadata(connection, doc_id, index_build_id=index_build_id)
     now = utc_now_iso()
     connection.execute(
         """
@@ -113,9 +157,32 @@ def reindex_document_fts(connection: sqlite3.Connection, vault_path: Path | str,
         """,
         (now, doc_id),
     )
+    _finish_index_build(
+        connection,
+        index_build_id,
+        status="succeeded",
+        metadata={"indexed_chunks": indexed_chunks},
+    )
 
 
 def refresh_document_fts_metadata(connection: sqlite3.Connection, doc_id: str) -> None:
+    """Refresh title/category/tag FTS columns for one document's current chunks."""
+    index_build_id = _start_index_build(connection, scope="document", doc_id=doc_id, trigger="metadata_refresh")
+    indexed_chunks = _refresh_document_fts_metadata(connection, doc_id, index_build_id=index_build_id)
+    _finish_index_build(
+        connection,
+        index_build_id,
+        status="succeeded",
+        metadata={"indexed_chunks": indexed_chunks},
+    )
+
+
+def _refresh_document_fts_metadata(
+    connection: sqlite3.Connection,
+    doc_id: str,
+    *,
+    index_build_id: str | None,
+) -> int:
     """Refresh title/category/tag FTS columns for one document's current chunks."""
     document = connection.execute(
         """
@@ -128,11 +195,11 @@ def refresh_document_fts_metadata(connection: sqlite3.Connection, doc_id: str) -
         (doc_id,),
     ).fetchone()
     if document is None or document["current_revision_id"] is None:
-        return
+        return 0
 
     chunks = _current_chunks(connection, doc_id, str(document["current_revision_id"]))
     if not chunks:
-        return
+        return 0
 
     connection.execute("DELETE FROM chunks_fts WHERE doc_id = ?", (doc_id,))
     tags = build_fts_text(_document_tags(connection, doc_id))
@@ -155,6 +222,16 @@ def refresh_document_fts_metadata(connection: sqlite3.Connection, doc_id: str) -
                 category,
             ),
         )
+        if index_build_id is not None:
+            _record_index_entry(
+                connection,
+                index_build_id=index_build_id,
+                doc_id=doc_id,
+                revision_id=str(document["current_revision_id"]),
+                chunk_id=str(chunk["chunk_id"]),
+                status="indexed",
+            )
+    return len(chunks)
 
 
 def _active_documents(connection: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -258,6 +335,92 @@ def _record_index_failure(
     return FtsIndexFailure(doc_id=doc_id, reason=reason, error_id=error_id)
 
 
+def _start_index_build(
+    connection: sqlite3.Connection,
+    *,
+    scope: str,
+    trigger: str,
+    doc_id: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> str:
+    index_build_id = new_prefixed_id("idxbuild")
+    now = utc_now_iso()
+    connection.execute(
+        """
+        INSERT INTO index_builds (
+          index_build_id, index_kind, scope, doc_id, trigger, status,
+          started_at, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
+        """,
+        (
+            index_build_id,
+            SOURCE_FTS_INDEX_KIND,
+            scope,
+            doc_id,
+            trigger,
+            now,
+            _json(metadata),
+            now,
+            now,
+        ),
+    )
+    return index_build_id
+
+
+def _finish_index_build(
+    connection: sqlite3.Connection,
+    index_build_id: str,
+    *,
+    status: str,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    now = utc_now_iso()
+    connection.execute(
+        """
+        UPDATE index_builds
+        SET status = ?,
+            finished_at = ?,
+            metadata_json = COALESCE(?, metadata_json),
+            updated_at = ?
+        WHERE index_build_id = ?
+        """,
+        (status, now, _json(metadata), now, index_build_id),
+    )
+
+
+def _record_index_entry(
+    connection: sqlite3.Connection,
+    *,
+    index_build_id: str,
+    doc_id: str,
+    revision_id: str,
+    chunk_id: str | None,
+    status: str,
+    reason: str | None = None,
+) -> None:
+    now = utc_now_iso()
+    connection.execute(
+        """
+        INSERT INTO index_build_entries (
+          index_build_entry_id, index_build_id, doc_id, revision_id, chunk_id,
+          status, reason, indexed_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_prefixed_id("idxentry"),
+            index_build_id,
+            doc_id,
+            revision_id,
+            chunk_id,
+            status,
+            reason,
+            now if status == "indexed" else None,
+            now,
+            now,
+        ),
+    )
+
+
 def _create_review_once(
     connection: sqlite3.Connection,
     *,
@@ -301,16 +464,28 @@ def _heading_path_text(heading_path_json: str | None) -> str:
 
 
 def _document_tags(connection: sqlite3.Connection, doc_id: str) -> str:
+    from indbase_core.tag_search import TRUSTED_DOCUMENT_TAG_SOURCES
+
+    trusted_sources = ", ".join(f"'{value}'" for value in sorted(TRUSTED_DOCUMENT_TAG_SOURCES))
     rows = connection.execute(
-        """
+        f"""
         SELECT t.name
         FROM document_tags dt
         JOIN tags t ON t.tag_id = dt.tag_id
         WHERE dt.doc_id = ?
           AND dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND dt.source IN ({trusted_sources})
           AND t.deleted_at IS NULL
+          AND t.status = 'active'
         ORDER BY t.name
         """,
         (doc_id,),
     ).fetchall()
     return " ".join(str(row["name"]) for row in rows)
+
+
+def _json(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)

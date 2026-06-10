@@ -4,7 +4,7 @@
 
 Local-first personal knowledge database: ingest local files into a vault, keep immutable source revisions, chunk and index content, and return searchable snippets tied to `doc_id` / `revision_id` / `chunk_id`.
 
-**Current status:** v0.1 Foundation MVP is frozen at `0.1.0`; **v0.2 swallow ingest** and **v0.2 transition output** are implemented. See [Project status](docs/project-status.md) for the full delivery summary.
+**Current status:** v0.1 is frozen; v0.2 swallow ingest, v0.2 transition output, taxonomy, tag governance, governed source search, consoler Source Trust coordination, and v0.3.3 retrieval evaluation/readiness are implemented. See [Current active work](docs/active/current.md) and [Project status](docs/project-status.md).
 
 ## Who this is for
 
@@ -35,7 +35,7 @@ uv sync --group dev --extra swallow
 
 ```powershell
 # Create a vault
-uv run indb init .\my-vault --category-template minimal
+uv run indb init .\my-vault
 
 # Enable swallow for real conversion (required for v0.2 ingest)
 # Edit my-vault\.indbase\config\config.toml → features.swallow_ingest = true
@@ -74,6 +74,7 @@ uv run python -m pytest
 uv run python -m compileall -q src tests scripts
 uv run python scripts/v02_deterministic_release_gate.py
 uv run python scripts/doctor_negative_gate.py
+uv run python scripts/check_docs.py
 ```
 
 Details: [Testing](docs/testing.md).
@@ -83,10 +84,13 @@ Details: [Testing](docs/testing.md).
 | Document | Purpose |
 | --- | --- |
 | [docs/project-status.md](docs/project-status.md) | **What is shipped** (replaces reading many old checkpoints) |
+| [docs/active/current.md](docs/active/current.md) | Current active scope and must-read docs |
+| [docs/phase-manifest.yaml](docs/phase-manifest.yaml) | Machine-readable phase lifecycle state |
 | [docs/testing.md](docs/testing.md) | **What passes** — pytest, gates, CI |
 | [docs/development.md](docs/development.md) | Local setup, feature flags |
 | [docs/architecture.md](docs/architecture.md) | Trust boundaries and module map |
-| [docs/planning/](docs/planning/) | Active product specs; [archive/](docs/planning/archive/) for historical checkpoints |
+| [docs/contracts/](docs/contracts/) | Durable trust, revision, artifact, search, and adapter contracts |
+| [docs/planning/](docs/planning/) | Lifecycle-managed product specs; [archive/](docs/planning/archive/) for historical checkpoints |
 | [AGENTS.md](AGENTS.md) | Rules for coding agents |
 
 ## License

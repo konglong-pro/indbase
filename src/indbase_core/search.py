@@ -20,6 +20,9 @@ from indbase_core.search_text import (
 from indbase_core.time import utc_now_iso
 
 
+FILTER_ONLY_SNIPPETS_PER_DOC = 2
+
+
 @dataclass(frozen=True)
 class SearchOptions:
     top_k: int = 20
@@ -27,6 +30,9 @@ class SearchOptions:
     persist_search_results: bool = False
     cjk_strategy: str = "substring_fallback"
     mode: str = "fts"
+    category_id: str | None = None
+    tag_filter_ids: tuple[str, ...] | None = None
+    governed_filters_applied: bool = False
 
     @classmethod
     def from_config(cls, config: SearchConfig) -> "SearchOptions":
@@ -36,6 +42,14 @@ class SearchOptions:
             persist_search_results=config.persist_search_results,
             cjk_strategy=config.cjk_strategy,
         )
+
+
+@dataclass(frozen=True)
+class SearchMatchExplanation:
+    text_match: dict[str, object] | None
+    filter_match: dict[str, object] | None
+    applied_filters: tuple[str, ...]
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -49,6 +63,7 @@ class SearchResult:
     snippet: str
     score: float
     match_source: str
+    explanation: SearchMatchExplanation | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +72,19 @@ class SearchResultSet:
     query_text: str
     result_count: int
     results: tuple[SearchResult, ...]
+
+
+@dataclass(frozen=True)
+class GovernedSearchResult:
+    filters: "GovernedSearchFilters"
+    normalized_query: str
+    query_id: str | None
+    result_count: int
+    results: tuple[SearchResult, ...]
+
+    @property
+    def query_text(self) -> str:
+        return self.normalized_query
 
 
 @dataclass
@@ -78,7 +106,39 @@ def search_chunks(
     options: SearchOptions | None = None,
 ) -> SearchResultSet:
     opts = options or SearchOptions()
-    normalized_query = query.strip()
+    if opts.governed_filters_applied:
+        normalized_query = query.strip()
+        category_id = opts.category_id
+        tag_filter_ids = opts.tag_filter_ids
+    else:
+        from indbase_core.category_taxonomy import parse_search_query
+        from indbase_core.tag_search import parse_tag_search_query, resolve_tag_filter
+
+        category_ref, remainder = parse_search_query(query)
+        tag_ref, remainder = parse_tag_search_query(remainder)
+        normalized_query = remainder.strip()
+        category_id = opts.category_id
+        if category_ref and not category_id:
+            from indbase_core.category_taxonomy import resolve_category_filter
+
+            category_id = resolve_category_filter(connection, category_ref)
+            if category_id is None:
+                raise ValueError(f"Unknown category filter: {category_ref}")
+        tag_filter_ids = opts.tag_filter_ids
+        if tag_ref and tag_filter_ids is None:
+            tag_filter_ids = resolve_tag_filter(connection, tag_ref).filter_tag_ids
+        if not normalized_query and category_id:
+            normalized_query = "*"
+
+    has_filters = bool(category_id or tag_filter_ids)
+    if not normalized_query and has_filters:
+        return _search_filter_only(
+            connection,
+            query_text=query,
+            category_id=category_id,
+            tag_filter_ids=tag_filter_ids,
+            options=opts,
+        )
     if not normalized_query:
         return SearchResultSet(query_id=None, query_text=query, result_count=0, results=())
     if opts.mode not in {"fts", "vector", "hybrid"}:
@@ -87,7 +147,13 @@ def search_chunks(
     candidates: dict[str, _Candidate] = {}
     if opts.mode in {"fts", "hybrid"}:
         for rank, (chunk_id, score) in enumerate(
-            _fts_candidates(connection, normalized_query, limit=max(opts.top_k * 5, 25)),
+            _fts_candidates(
+                connection,
+                normalized_query,
+                limit=max(opts.top_k * 5, 25),
+                category_id=category_id,
+                tag_filter_ids=tag_filter_ids,
+            ),
             start=1,
         ):
             candidates[chunk_id] = _Candidate(
@@ -99,7 +165,15 @@ def search_chunks(
 
         cjk_query = prepare_cjk_fallback_query(normalized_query)
         if opts.cjk_strategy == "substring_fallback" and cjk_query.has_cjk:
-            for rank, (chunk_id, score) in enumerate(_cjk_fallback_candidates(connection, normalized_query), start=1):
+            for rank, (chunk_id, score) in enumerate(
+                _cjk_fallback_candidates(
+                    connection,
+                    normalized_query,
+                    category_id=category_id,
+                    tag_filter_ids=tag_filter_ids,
+                ),
+                start=1,
+            ):
                 candidate = candidates.get(chunk_id)
                 if candidate is None:
                     candidates[chunk_id] = _Candidate(
@@ -115,7 +189,12 @@ def search_chunks(
 
     if opts.mode in {"vector", "hybrid"}:
         for rank, (chunk_id, score) in enumerate(
-            _vector_candidates(connection, normalized_query, limit=max(opts.top_k * 5, 25)),
+            _vector_candidates(
+                connection,
+                normalized_query,
+                limit=max(opts.top_k * 5, 25),
+                tag_filter_ids=tag_filter_ids,
+            ),
             start=1,
         ):
             candidate = candidates.get(chunk_id)
@@ -131,7 +210,14 @@ def search_chunks(
                 candidate.vector_rank = rank
                 candidate.match_source = _combined_match_source(candidate)
 
-    ordered_candidates = sorted(candidates.values(), key=_candidate_sort_key)[: opts.top_k]
+    ordered_candidates = sorted(candidates.values(), key=_candidate_sort_key)
+    if tag_filter_ids:
+        ordered_candidates = [
+            candidate
+            for candidate in ordered_candidates
+            if _chunk_matches_tag_filter(connection, candidate.chunk_id, tag_filter_ids)
+        ]
+    ordered_candidates = ordered_candidates[: opts.top_k]
     rows_by_chunk_id = _load_result_rows(connection, [candidate.chunk_id for candidate in ordered_candidates])
     results: list[SearchResult] = []
     for candidate in ordered_candidates:
@@ -152,7 +238,18 @@ def search_chunks(
             )
         )
 
-    query_id = _record_search_query(connection, normalized_query, opts, len(results)) if opts.log_queries else None
+    query_id = (
+        _record_search_query(
+            connection,
+            query,
+            opts,
+            len(results),
+            category_id=category_id,
+            tag_filter_ids=tag_filter_ids,
+        )
+        if opts.log_queries
+        else None
+    )
     if query_id is not None and opts.persist_search_results:
         _persist_search_results(connection, query_id, results)
     connection.commit()
@@ -162,6 +259,205 @@ def search_chunks(
         result_count=len(results),
         results=tuple(results),
     )
+
+
+def governed_search_chunks(
+    connection: sqlite3.Connection,
+    query: str,
+    *,
+    category: str | None = None,
+    tag: str | None = None,
+    options: SearchOptions | None = None,
+) -> GovernedSearchResult:
+    """Governed source search with normalized filters and match explanations."""
+    from indbase_core.search_filters import (
+        GovernedSearchFilters,
+        build_governed_search_filters,
+        require_valid_filters,
+    )
+
+    filters = build_governed_search_filters(
+        connection,
+        query,
+        category_flag=category,
+        tag_flag=tag,
+    )
+    require_valid_filters(filters)
+    opts = options or SearchOptions()
+    search_opts = SearchOptions(
+        top_k=opts.top_k,
+        log_queries=opts.log_queries,
+        persist_search_results=opts.persist_search_results,
+        cjk_strategy=opts.cjk_strategy,
+        mode=opts.mode,
+        category_id=filters.category_id,
+        tag_filter_ids=filters.tag_filter_ids,
+        governed_filters_applied=True,
+    )
+    result_set = search_chunks(connection, filters.text_query, options=search_opts)
+    explained = tuple(
+        _with_explanation(connection, row, filters, normalized_query=filters.text_query)
+        for row in result_set.results
+    )
+    return GovernedSearchResult(
+        filters=filters,
+        normalized_query=filters.text_query,
+        query_id=result_set.query_id,
+        result_count=len(explained),
+        results=explained,
+    )
+
+
+def _search_filter_only(
+    connection: sqlite3.Connection,
+    *,
+    query_text: str,
+    category_id: str | None,
+    tag_filter_ids: tuple[str, ...] | None,
+    options: SearchOptions,
+) -> SearchResultSet:
+    pool_limit = max(options.top_k * 10, 50)
+    raw_candidates = _fts_candidates(
+        connection,
+        "*",
+        limit=pool_limit,
+        category_id=category_id,
+        tag_filter_ids=tag_filter_ids,
+    )
+    per_doc: dict[str, int] = {}
+    selected: list[str] = []
+    for chunk_id, _score in raw_candidates:
+        row = connection.execute(
+            "SELECT doc_id FROM chunks WHERE chunk_id = ?",
+            (chunk_id,),
+        ).fetchone()
+        if row is None:
+            continue
+        doc_id = str(row["doc_id"])
+        count = per_doc.get(doc_id, 0)
+        if count >= FILTER_ONLY_SNIPPETS_PER_DOC:
+            continue
+        per_doc[doc_id] = count + 1
+        selected.append(chunk_id)
+        if len(selected) >= options.top_k:
+            break
+
+    rows_by_chunk_id = _load_result_rows(connection, selected)
+    results: list[SearchResult] = []
+    for chunk_id in selected:
+        row = rows_by_chunk_id.get(chunk_id)
+        if row is None:
+            continue
+        results.append(
+            SearchResult(
+                rank=len(results) + 1,
+                doc_id=str(row["doc_id"]),
+                revision_id=str(row["revision_id"]),
+                chunk_id=str(row["chunk_id"]),
+                title=row["title"],
+                source_path=row["source_path"],
+                snippet=build_snippet(str(row["text"]), ""),
+                score=0.0,
+                match_source="filter_only",
+            )
+        )
+
+    query_id = (
+        _record_search_query(
+            connection,
+            query_text,
+            options,
+            len(results),
+            category_id=category_id,
+            tag_filter_ids=tag_filter_ids,
+        )
+        if options.log_queries
+        else None
+    )
+    if query_id is not None and options.persist_search_results:
+        _persist_search_results(connection, query_id, results)
+    connection.commit()
+    return SearchResultSet(
+        query_id=query_id,
+        query_text="",
+        result_count=len(results),
+        results=tuple(results),
+    )
+
+
+def _with_explanation(
+    connection: sqlite3.Connection,
+    result: SearchResult,
+    filters: "GovernedSearchFilters",
+    *,
+    normalized_query: str,
+) -> SearchResult:
+    applied: list[str] = []
+    if filters.category is not None:
+        applied.append("category")
+    if filters.tag is not None:
+        applied.append("tag")
+    if normalized_query:
+        applied.append("text")
+
+    text_match: dict[str, object] | None = None
+    if normalized_query:
+        text_match = {"query": normalized_query, "source": result.match_source}
+
+    filter_match: dict[str, object] | None = None
+    if filters.tag is not None:
+        tag_source = _trusted_tag_source_for_doc(
+            connection,
+            result.doc_id,
+            filters.tag.filter_tag_ids,
+        )
+        filter_match = {"tag_source": tag_source} if tag_source else {"tag_source": None}
+
+    explanation = SearchMatchExplanation(
+        text_match=text_match,
+        filter_match=filter_match,
+        applied_filters=tuple(applied),
+        warnings=filters.warnings,
+    )
+    return SearchResult(
+        rank=result.rank,
+        doc_id=result.doc_id,
+        revision_id=result.revision_id,
+        chunk_id=result.chunk_id,
+        title=result.title,
+        source_path=result.source_path,
+        snippet=result.snippet,
+        score=result.score,
+        match_source=result.match_source,
+        explanation=explanation,
+    )
+
+
+def _trusted_tag_source_for_doc(
+    connection: sqlite3.Connection,
+    doc_id: str,
+    filter_tag_ids: tuple[str, ...],
+) -> str | None:
+    if not filter_tag_ids:
+        return None
+    placeholders = ", ".join("?" for _ in filter_tag_ids)
+    row = connection.execute(
+        f"""
+        SELECT dt.source
+        FROM document_tags dt
+        WHERE dt.doc_id = ?
+          AND dt.deleted_at IS NULL
+          AND dt.status = 'active'
+          AND dt.source IN ('accepted_candidate', 'auto', 'legacy_classification', 'manual')
+          AND dt.tag_id IN ({placeholders})
+        ORDER BY dt.created_at
+        LIMIT 1
+        """,
+        (doc_id, *filter_tag_ids),
+    ).fetchone()
+    if row is None:
+        return None
+    return str(row["source"])
 
 
 def build_snippet(text: str, query: str, *, max_chars: int = 220) -> str:
@@ -192,13 +488,62 @@ def build_snippet(text: str, query: str, *, max_chars: int = 220) -> str:
     return snippet
 
 
-def _fts_candidates(connection: sqlite3.Connection, query: str, *, limit: int) -> list[tuple[str, float]]:
-    match_query = _fts_match_query(query)
-    if not match_query:
-        return []
-    try:
-        rows = connection.execute(
+def _tag_filter_clause(tag_filter_ids: tuple[str, ...] | None) -> tuple[str, list[object]]:
+    if not tag_filter_ids:
+        return "", []
+    placeholders = ", ".join("?" for _ in tag_filter_ids)
+    clause = f"""
+              AND EXISTS (
+                SELECT 1
+                FROM document_tags filter_dt
+                WHERE filter_dt.doc_id = d.doc_id
+                  AND filter_dt.deleted_at IS NULL
+                  AND filter_dt.status = 'active'
+                  AND filter_dt.source IN ('accepted_candidate', 'auto', 'legacy_classification', 'manual')
+                  AND filter_dt.tag_id IN ({placeholders})
+              )
             """
+    return clause, list(tag_filter_ids)
+
+
+def _fts_candidates(
+    connection: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int,
+    category_id: str | None = None,
+    tag_filter_ids: tuple[str, ...] | None = None,
+) -> list[tuple[str, float]]:
+    match_query = _fts_match_query(query)
+    if query != "*" and not match_query:
+        return []
+    if query == "*":
+        match_query = None
+    category_clause = ""
+    tag_clause, tag_params = _tag_filter_clause(tag_filter_ids)
+    params: list[object] = []
+    if category_id:
+        category_clause = " AND d.category_id = ?"
+        params.append(category_id)
+    if match_query is None:
+        sql = f"""
+            SELECT c.chunk_id, 0.0 AS score
+            FROM chunks c
+            JOIN documents d ON d.doc_id = c.doc_id
+            WHERE d.status = 'active'
+              AND d.deleted_at IS NULL
+              AND d.current_revision_id = c.revision_id
+              AND c.is_current = 1
+              AND c.deleted_at IS NULL
+              {category_clause}
+              {tag_clause}
+            ORDER BY d.created_at, c.sequence
+            LIMIT ?
+        """
+        params.extend(tag_params)
+        params.append(limit)
+    else:
+        sql = f"""
             SELECT f.chunk_id, bm25(chunks_fts) AS score
             FROM chunks_fts f
             JOIN chunks c ON c.chunk_id = f.chunk_id
@@ -209,19 +554,35 @@ def _fts_candidates(connection: sqlite3.Connection, query: str, *, limit: int) -
               AND d.current_revision_id = c.revision_id
               AND c.is_current = 1
               AND c.deleted_at IS NULL
+              {category_clause}
+              {tag_clause}
             ORDER BY score
             LIMIT ?
-            """,
-            (match_query, limit),
-        ).fetchall()
+        """
+        params = [match_query, *params, *tag_params, limit]
+    try:
+        rows = connection.execute(sql, params).fetchall()
     except sqlite3.OperationalError:
         return []
     return [(str(row["chunk_id"]), float(row["score"])) for row in rows]
 
 
-def _cjk_fallback_candidates(connection: sqlite3.Connection, query: str) -> list[tuple[str, int]]:
+def _cjk_fallback_candidates(
+    connection: sqlite3.Connection,
+    query: str,
+    *,
+    category_id: str | None = None,
+    tag_filter_ids: tuple[str, ...] | None = None,
+) -> list[tuple[str, int]]:
+    category_clause = ""
+    tag_clause, tag_params = _tag_filter_clause(tag_filter_ids)
+    params: list[object] = []
+    if category_id:
+        category_clause = " AND d.category_id = ?"
+        params.append(category_id)
+    params.extend(tag_params)
     rows = connection.execute(
-        """
+        f"""
         SELECT c.chunk_id, c.heading_path_json, c.text, d.title
         FROM chunks c
         JOIN documents d ON d.doc_id = c.doc_id
@@ -230,8 +591,11 @@ def _cjk_fallback_candidates(connection: sqlite3.Connection, query: str) -> list
           AND d.current_revision_id = c.revision_id
           AND c.is_current = 1
           AND c.deleted_at IS NULL
+          {category_clause}
+          {tag_clause}
         ORDER BY d.created_at, c.sequence
-        """
+        """,
+        params,
     ).fetchall()
     scored: list[tuple[str, int]] = []
     for row in rows:
@@ -274,8 +638,19 @@ def _record_search_query(
     query: str,
     options: SearchOptions,
     result_count: int,
+    *,
+    category_id: str | None = None,
+    tag_filter_ids: tuple[str, ...] | None = None,
 ) -> str:
     query_id = new_prefixed_id("query")
+    filters: dict[str, object] = {
+        "scope": "sources_current",
+        "cjk_strategy": options.cjk_strategy,
+    }
+    if category_id:
+        filters["category_id"] = category_id
+    if tag_filter_ids:
+        filters["tag_filter_ids"] = list(tag_filter_ids)
     connection.execute(
         """
         INSERT INTO search_queries(query_id, query_text, mode, filters_json, top_k, result_count, created_at)
@@ -285,10 +660,7 @@ def _record_search_query(
             query_id,
             query,
             options.mode,
-            json.dumps(
-                {"scope": "sources_current", "cjk_strategy": options.cjk_strategy},
-                sort_keys=True,
-            ),
+            json.dumps(filters, sort_keys=True),
             options.top_k,
             result_count,
             utc_now_iso(),
@@ -352,7 +724,29 @@ def _heading_path_text(heading_path_json: str | None) -> str:
     return " ".join(str(value) for value in parsed)
 
 
-def _vector_candidates(connection: sqlite3.Connection, query: str, *, limit: int) -> list[tuple[str, float]]:
+def _chunk_matches_tag_filter(
+    connection: sqlite3.Connection,
+    chunk_id: str,
+    tag_filter_ids: tuple[str, ...],
+) -> bool:
+    from indbase_core.tag_search import document_matches_tag_filter
+
+    row = connection.execute(
+        "SELECT doc_id FROM chunks WHERE chunk_id = ?",
+        (chunk_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    return document_matches_tag_filter(connection, str(row["doc_id"]), tag_filter_ids)
+
+
+def _vector_candidates(
+    connection: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int,
+    tag_filter_ids: tuple[str, ...] | None = None,
+) -> list[tuple[str, float]]:
     query_vector = DeterministicEmbeddingAdapter().embed(query)
     rows = connection.execute(
         """

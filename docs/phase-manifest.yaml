@@ -1,0 +1,232 @@
+version: 1
+last_updated: 2026-06-10
+
+current:
+  indbase:
+    phase_id: v0.3.5
+    title: Engineering Stability Hardening
+    status: completed
+    owner: indbase
+    canonical_spec: docs/planning/active/v0.3.5-engineering-stability-hardening.scope.md
+    agent_rules: docs/agents/current/indbase.md
+    release_gate: scripts/v035_stability_hardening_gate.py
+    status_summary: docs/project-status.md
+    related_contracts:
+      - docs/contracts/provider-capability-contract.md
+      - docs/contracts/trust-boundary.md
+      - docs/contracts/artifact-contract.md
+      - docs/contracts/consoler-agent-boundary.md
+      - docs/contracts/revision-contract.md
+      - docs/contracts/source-search-contract.md
+    allowed_areas:
+      - provider_capability_contracts
+      - provider_bindings
+      - fake_provider_tests
+      - installed_wheel_smoke
+      - consoler_sdk_extra_contract
+      - swallow_adapter_boundary
+      - transition_adapter_boundary
+      - evidence_packages
+      - evidence_store
+      - provider_runs
+      - provider_failure_classification
+      - provider_health
+      - provider_error_mapping
+      - provider_doctor_sections
+      - doctor_drift_detection
+      - agent_operation_trace_metadata
+      - provider_evidence_artifact_views
+      - artifact_view_leak_hardening
+      - search_pollution_tests
+      - normalize_replace_regression
+      - source_fts_lineage
+      - retrieval_regression_thresholds
+      - docs_lifecycle
+    forbidden_areas:
+      - ask
+      - generated_answers
+      - citations_writes
+      - llm_judges
+      - provider_cache_as_truth
+      - provider_uri_artifact_blocks
+      - direct_agent_provider_calls
+      - direct_core_provider_backend_imports
+      - default_http_provider_profiles
+      - default_mcp_provider_profiles
+      - provider_backend_user_options
+      - retrieval_ranking_rewrite
+      - taxonomy_mutation
+      - source_revision_mutation_outside_promotion
+      - vault_browser
+    related_external:
+      swallow:
+        phase_id: capability-provider-p1
+        status: referenced
+        canonical_spec: E:\swallow\docs\capability-provider-p1.md
+      transition:
+        phase_id: capability-provider
+        status: referenced
+        canonical_spec: E:\transition\docs\contracts\capability-provider.md
+      consoler:
+        phase_id: v5a
+        status: referenced
+        canonical_spec: E:\consoler\docs\planning\active\v5a-operation-trace-artifact-vocabulary.md
+
+phases:
+  v0.1:
+    status: frozen
+    canonical_spec: docs/planning/archive/v0.1/mvp-v0.1-spec.plan.md
+    closeout: docs/testing/archive/v0.1-foundation-closeout.md
+    release_gate: scripts/mvp_release_gate.py
+    evidence:
+      - docs/planning/archive/v0.1/mvp-v0.1-release-manifest.json
+      - docs/planning/archive/mvp-v0.1-freeze.md
+
+  v0.2-swallow-ingest:
+    status: shipped
+    canonical_spec: docs/planning/archive/v0.2/swallow-ingest-integration.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.2-swallow-ingest-integration.md
+    release_gate: scripts/v02_swallow_smoke_gate.py
+    closeout: docs/testing/archive/v0.2-swallow-ingest-closeout.md
+    supersedes:
+      - v0.1-direct-normalizer-rules
+
+  v0.2-transition-output:
+    status: shipped
+    canonical_spec: docs/planning/archive/v0.2/transition-output-integration.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.2-transition-output-integration.md
+    release_gate: scripts/v02_transition_smoke_gate.py
+    closeout: docs/testing/archive/v0.2-transition-output-closeout.md
+
+  v0.3.1-taxonomy-foundation:
+    status: superseded
+    canonical_spec: docs/planning/superseded/v0.3.1-taxonomy-foundation.md
+    agent_rules: docs/agents/archive/indbase/v0.3.1-taxonomy-foundation.md
+    closeout: docs/testing/archive/v0.3.1-taxonomy-foundation-closeout.md
+    superseded_by:
+      - v0.3.1-taxonomy-category-foundation
+      - v0.3.2-tag-governance-foundation
+      - v0.3.2-retrieval-intelligence-foundation
+
+  v0.3.1-taxonomy-category-foundation:
+    status: shipped
+    canonical_spec: docs/planning/archive/v0.3.1/taxonomy-category-foundation.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.1-taxonomy-category-foundation.md
+    release_gate: scripts/v031_taxonomy_category_release_gate.py
+    closeout: docs/testing/archive/v0.3.1-taxonomy-category-foundation-closeout.md
+
+  v0.3.2-tag-governance-foundation:
+    status: shipped
+    canonical_spec: docs/planning/archive/v0.3.2/tag-governance-foundation.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2-tag-governance-foundation.md
+    release_gate: scripts/v032_tag_governance_release_gate.py
+    closeout: docs/testing/archive/v0.3.2-tag-governance-foundation-closeout.md
+
+  v0.3.2.1-tag-harness-hardening:
+    status: shipped
+    canonical_spec: docs/planning/archive/v0.3.2.1/tag-harness-hardening.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.1-tag-harness-hardening.md
+    release_gate: scripts/v0321_tag_harness_release_gate.py
+    closeout: docs/testing/archive/v0.3.2.1-tag-harness-hardening-closeout.md
+
+  v0.3.2.2-tag-search-governance:
+    status: shipped
+    canonical_spec: docs/planning/archive/v0.3.2.2/tag-search-governance.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.2-tag-search-governance.md
+    release_gate: scripts/v0322_tag_search_governance_release_gate.py
+    closeout: docs/testing/archive/v0.3.2.2-tag-search-governance-closeout.md
+
+  v0.3.2-retrieval-intelligence-foundation:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2-retrieval-intelligence/retrieval-intelligence-foundation.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2-retrieval-intelligence-foundation.md
+    release_gate: scripts/v032_retrieval_release_gate.py
+    closeout: docs/testing/archive/v0.3.2-retrieval-intelligence-closeout.md
+    evidence:
+      - docs/testing/archive/v0.3.2-retrieval-dogfood-report.md
+
+  v0.3.2.3-consoler-source-trust-probe:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2.3/consoler-source-trust-probe.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.3-consoler-source-trust-probe.md
+    closeout: docs/testing/archive/v0.3.2.3-closeout.md
+
+  v0.3.2.3a-consoler-probe-stabilization:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2.3a/consoler-probe-stabilization.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.3a-consoler-probe-stabilization.md
+    release_gate: scripts/v0323a_probe_stabilization_release_gate.py
+    closeout: docs/testing/archive/v0.3.2.3a-closeout.md
+
+  v0.3.2.3b-consoler-read-only-views:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2.3b/consoler-read-only-views.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.3b-consoler-read-only-views.md
+    release_gate: scripts/v0323b_consoler_readonly_views_release_gate.py
+    closeout: docs/testing/archive/v0.3.2.3b-closeout.md
+
+  v0.3.2.3c-consoler-variant-dogfood-ux:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2.3c/consoler-variant-dogfood-ux.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.3c-consoler-variant-dogfood-ux.md
+    closeout: docs/testing/archive/v0.3.2.3c-closeout.md
+
+  v0.3.2.3d-indbase-variant-intent-drafting:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2.3d/indbase-variant-intent-drafting.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.3d-indbase-variant-intent-drafting.md
+    closeout: docs/testing/archive/v0.3.2.3d-closeout.md
+
+  v0.3.2.3e-source-trust-real-dogfood-friction-pass:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2.3e/source-trust-real-dogfood-friction-pass.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.3e-source-trust-real-dogfood-friction-pass.md
+    closeout: docs/testing/archive/v0.3.2.3e-closeout.md
+
+  v0.3.2.3f-indbase-nl-v2-intent-drafting:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.2.3f/indbase-nl-v2-intent-drafting.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.2.3f-indbase-nl-v2-intent-drafting.md
+    closeout: docs/testing/archive/v0.3.2.3f-closeout.md
+
+  v0.3.3:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.3/retrieval-evaluation-answer-readiness.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.3-retrieval-evaluation-answer-readiness.md
+    release_gate: scripts/v033_retrieval_eval_release_gate.py
+
+  v0.3.4:
+    status: completed
+    canonical_spec: docs/planning/archive/v0.3.4/provider-evidence-trust-correlation.plan.md
+    agent_rules: docs/agents/archive/indbase/v0.3.4-provider-evidence-trust-correlation.md
+    release_gate: scripts/provider_fake_release_gate.py
+    closeout: docs/testing/archive/v0.3.4-provider-evidence-trust-correlation-closeout.md
+    evidence:
+      - docs/contracts/provider-capability-contract.md
+      - capability-bindings.yaml
+
+  v0.3.5:
+    status: completed
+    canonical_spec: docs/planning/active/v0.3.5-engineering-stability-hardening.scope.md
+    agent_rules: docs/agents/current/indbase.md
+    stage1_agent_rules: docs/agents/current/v0.3.5-stage1-provider-reliability-packaging/AGENTS.md
+    execution_plan: docs/planning/active/v0.3.5-stage1-provider-reliability-packaging.execution.md
+    stage2_agent_rules: docs/agents/current/v0.3.5-stage2-normalize-index-lineage/AGENTS.md
+    stage2_execution_plan: docs/planning/active/v0.3.5-stage2-normalize-index-lineage.execution.md
+    release_gate: scripts/v035_stability_hardening_gate.py
+    closeout: docs/testing/archive/v0.3.5-engineering-stability-hardening-closeout.md
+    depends_on:
+      - v0.3.4
+    related_contracts:
+      - docs/contracts/provider-capability-contract.md
+      - docs/contracts/trust-boundary.md
+      - docs/contracts/artifact-contract.md
+      - docs/contracts/consoler-agent-boundary.md
+      - docs/contracts/source-search-contract.md
+      - docs/contracts/revision-contract.md
+
+superseded:
+  v0.1-direct-normalizer-rules:
+    status: superseded
+    canonical_doc: docs/planning/superseded/v0.1-direct-normalizer-rules.md
+    superseded_by: docs/planning/archive/v0.2/swallow-ingest-integration.plan.md

@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -36,6 +37,74 @@ from indbase_core.swallow_adapter import (
 )
 from indbase_core.tasks import add_task_event, create_task, finish_task, start_task
 from indbase_core.time import utc_now_iso
+
+M3_PIPELINE_CHECKPOINT_STAGES = (
+    "plan",
+    "archive",
+    "conversion",
+    "revision",
+    "chunk",
+    "index",
+    "finalize",
+)
+
+
+class IngestCheckpointCancelled(Exception):
+    def __init__(self, checkpoint: str, original: BaseException) -> None:
+        self.checkpoint = checkpoint
+        self.original = original
+        super().__init__(str(original))
+
+
+def _cancelled_checkpoint(exc: BaseException) -> str | None:
+    checkpoint = getattr(exc, "checkpoint", None)
+    return checkpoint if isinstance(checkpoint, str) and checkpoint else None
+
+
+def _invoke_checkpoint(checkpoint: Callable[[str], None] | None, stage: str) -> None:
+    if checkpoint is None:
+        return
+    try:
+        checkpoint(stage)
+    except BaseException as exc:
+        cancelled_checkpoint = _cancelled_checkpoint(exc)
+        if cancelled_checkpoint is not None:
+            raise IngestCheckpointCancelled(cancelled_checkpoint, exc) from exc
+        raise
+
+
+def _finish_pipeline_task_on_error(
+    connection: sqlite3.Connection,
+    task_id: str,
+    exc: BaseException,
+) -> None:
+    if isinstance(exc, IngestCheckpointCancelled):
+        checkpoint = exc.checkpoint
+        original = exc.original
+        add_task_event(
+            connection,
+            task_id,
+            "ingest_cancelled",
+            "Ingest cancelled at cooperative checkpoint.",
+            {"checkpoint": checkpoint},
+        )
+        finish_task(
+            connection,
+            task_id,
+            "cancelled",
+            error_data={
+                "type": original.__class__.__name__,
+                "message": str(original),
+                "checkpoint": checkpoint,
+            },
+        )
+        return
+    finish_task(
+        connection,
+        task_id,
+        "failed",
+        error_data={"type": type(exc).__name__, "message": str(exc)},
+    )
 
 
 @dataclass(frozen=True)
@@ -243,6 +312,7 @@ def run_m2_ingest_pipeline(
                 "converted_items": len(conversion_result.converted_items),
                 "skipped_items": conversion_result.skipped_items,
                 "failed_items": conversion_result.failed_items,
+                "provider_runs": _provider_runs_for_task(connection, task_id),
             },
         )
         revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
@@ -295,6 +365,7 @@ def run_m3_ingest_pipeline(
     *,
     recursive: bool = False,
     ingest_config: IngestConfig | None = None,
+    checkpoint: Callable[[str], None] | None = None,
 ) -> IngestPipelineResult:
     resolved_ingest_config = _resolve_ingest_config(vault_path, ingest_config)
     connection = connect(Path(vault_path) / ".indbase" / "db.sqlite")
@@ -310,6 +381,7 @@ def run_m3_ingest_pipeline(
         )
         start_task(connection, task_id)
         add_task_event(connection, task_id, "ingest_started", "M3 searchable ingest started.")
+        _invoke_checkpoint(checkpoint, "plan")
         plan = plan_ingest_sources(
             connection,
             source_input,
@@ -329,6 +401,7 @@ def run_m3_ingest_pipeline(
                 "duplicate_items": plan.duplicate_items,
             },
         )
+        _invoke_checkpoint(checkpoint, "archive")
         archive_result = archive_pending_sources(
             connection,
             vault_path,
@@ -345,6 +418,7 @@ def run_m3_ingest_pipeline(
                 "failed_items": archive_result.failed_items,
             },
         )
+        _invoke_checkpoint(checkpoint, "conversion")
         conversion_result = convert_archived_sources(connection, vault_path, plan.ingest_id)
         add_task_event(
             connection,
@@ -355,8 +429,10 @@ def run_m3_ingest_pipeline(
                 "converted_items": len(conversion_result.converted_items),
                 "skipped_items": conversion_result.skipped_items,
                 "failed_items": conversion_result.failed_items,
+                "provider_runs": _provider_runs_for_task(connection, task_id),
             },
         )
+        _invoke_checkpoint(checkpoint, "revision")
         revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
         add_task_event(
             connection,
@@ -368,6 +444,7 @@ def run_m3_ingest_pipeline(
                 "failed_items": revision_result.failed_items,
             },
         )
+        _invoke_checkpoint(checkpoint, "chunk")
         chunked_documents = _chunk_written_revisions(connection, vault_path, revision_result.written_revisions)
         add_task_event(
             connection,
@@ -378,6 +455,7 @@ def run_m3_ingest_pipeline(
                 "chunked_documents": chunked_documents,
             },
         )
+        _invoke_checkpoint(checkpoint, "index")
         index_result = rebuild_fts_index(connection, vault_path)
         current_index_failed_documents = _mark_current_ingest_index_failures(
             connection,
@@ -396,6 +474,9 @@ def run_m3_ingest_pipeline(
                 "current_ingest_failed_documents": current_index_failed_documents,
             },
         )
+        _invoke_checkpoint(checkpoint, "finalize")
+        taxonomy_issues = _run_post_ingest_category_taxonomy(connection, vault_path, task_id)
+        tagging_issues = _run_post_ingest_tag_governance(connection, vault_path, task_id)
         _finalize_m3_ingest_run(connection, plan.ingest_id)
         result = _load_pipeline_result(
             connection,
@@ -407,7 +488,9 @@ def run_m3_ingest_pipeline(
             index_failed_documents=current_index_failed_documents,
         )
         finish_status = result.status
-        if finish_status == "succeeded" and current_index_failed_documents > 0:
+        if finish_status == "succeeded" and (
+            current_index_failed_documents > 0 or taxonomy_issues or tagging_issues
+        ):
             finish_status = "completed_with_issues"
         finish_task(
             connection,
@@ -450,12 +533,9 @@ def run_m3_ingest_pipeline(
         return result
     except Exception as exc:
         if "task_id" in locals():
-            finish_task(
-                connection,
-                task_id,
-                "failed",
-                error_data={"type": type(exc).__name__, "message": str(exc)},
-            )
+            _finish_pipeline_task_on_error(connection, task_id, exc)
+        if isinstance(exc, IngestCheckpointCancelled):
+            raise exc.original from exc
         raise
     finally:
         connection.close()
@@ -514,6 +594,7 @@ def run_m3_url_ingest_pipeline(
                 "converted_items": len(conversion_result.converted_items),
                 "skipped_items": conversion_result.skipped_items,
                 "failed_items": conversion_result.failed_items,
+                "provider_runs": _provider_runs_for_task(connection, task_id),
             },
         )
         revision_result = write_revisions_for_converted_sources(connection, vault_path, plan.ingest_id)
@@ -555,6 +636,8 @@ def run_m3_url_ingest_pipeline(
                 "current_ingest_failed_documents": current_index_failed_documents,
             },
         )
+        taxonomy_issues = _run_post_ingest_category_taxonomy(connection, vault_path, task_id)
+        tagging_issues = _run_post_ingest_tag_governance(connection, vault_path, task_id)
         _finalize_m3_ingest_run(connection, plan.ingest_id)
         result = _load_pipeline_result(
             connection,
@@ -566,7 +649,9 @@ def run_m3_url_ingest_pipeline(
             index_failed_documents=current_index_failed_documents,
         )
         finish_status = result.status
-        if finish_status == "succeeded" and current_index_failed_documents > 0:
+        if finish_status == "succeeded" and (
+            current_index_failed_documents > 0 or taxonomy_issues or tagging_issues
+        ):
             finish_status = "completed_with_issues"
         finish_task(
             connection,
@@ -719,6 +804,8 @@ def run_m3_archive_ingest_pipeline(
                 "current_ingest_failed_documents": current_index_failed_documents,
             },
         )
+        taxonomy_issues = _run_post_ingest_category_taxonomy(connection, vault_path, task_id)
+        tagging_issues = _run_post_ingest_tag_governance(connection, vault_path, task_id)
         _finalize_m3_ingest_run(connection, plan.ingest_id)
         result = _load_pipeline_result(
             connection,
@@ -730,7 +817,9 @@ def run_m3_archive_ingest_pipeline(
             index_failed_documents=current_index_failed_documents,
         )
         finish_status = result.status
-        if finish_status == "succeeded" and current_index_failed_documents > 0:
+        if finish_status == "succeeded" and (
+            current_index_failed_documents > 0 or taxonomy_issues or tagging_issues
+        ):
             finish_status = "completed_with_issues"
         finish_task(
             connection,
@@ -872,7 +961,7 @@ def _create_url_ingest_source(
             VALUES (
               ?, NULL, ?, ?, ?, 'active', 'url', ?, ?, ?, NULL, ?, NULL,
               'cat_uncategorized', NULL, NULL, 0, 'archived', 'not_indexed',
-              'not_applicable', 'manual', 'public_url', '{}', NULL, ?, ?
+              'not_applicable', NULL, 'public_url', '{}', NULL, ?, ?
             )
             """,
             (
@@ -1170,7 +1259,7 @@ def _insert_archive_logical_source(
             VALUES (
               ?, NULL, ?, ?, ?, 'active', 'chatgpt_conversation', ?, ?, ?,
               NULL, ?, NULL, 'cat_uncategorized', ?, ?, ?, ?, 'not_indexed',
-              'not_applicable', 'manual', 'local_archive', ?, ?, ?, ?
+              'not_applicable', NULL, 'local_archive', ?, ?, ?, ?
             )
             """,
             (
@@ -2193,3 +2282,146 @@ def _ingest_successful_items_are_searchable(connection: sqlite3.Connection, inge
         (ingest_id,),
     ).fetchone()
     return int(succeeded["count"] or 0) > 0 and int(row["count"] or 0) == 0
+
+
+def _provider_runs_for_task(connection: sqlite3.Connection, task_id: str) -> list[dict[str, object]]:
+    try:
+        rows = connection.execute(
+            """
+            SELECT provider_run_id, operation_id, provider_id, provider_version,
+                   capability_id, transport_profile, provider_job_id,
+                   provider_status, evidence_status
+            FROM provider_runs
+            WHERE task_id = ?
+            ORDER BY created_at, provider_run_id
+            """,
+            (task_id,),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [
+        {
+            "provider_run_id": row["provider_run_id"],
+            "operation_id": row["operation_id"],
+            "provider_id": row["provider_id"],
+            "provider_version": row["provider_version"],
+            "capability_id": row["capability_id"],
+            "profile": row["transport_profile"],
+            "provider_job_id": row["provider_job_id"],
+            "provider_status": row["provider_status"],
+            "evidence_copied": row["evidence_status"] == "copied",
+        }
+        for row in rows
+    ]
+
+
+def _run_post_ingest_category_taxonomy(
+    connection: sqlite3.Connection,
+    vault_path: Path | str,
+    task_id: str,
+) -> bool:
+    """Run v0.3.1 category taxonomy when enabled. Returns True if visible issues occurred."""
+    paths = vault_paths(vault_path)
+    if not paths.config_path.is_file():
+        return False
+    try:
+        config = load_config(paths.config_path)
+    except Exception:
+        return False
+    if not config.features.category_taxonomy:
+        return False
+
+    from indbase_core.category_taxonomy import run_category_classification
+
+    try:
+        result = run_category_classification(connection, trigger="post_ingest")
+    except Exception as exc:
+        record_error(
+            connection,
+            component="category_taxonomy",
+            error_type="category_taxonomy_failed",
+            message=str(exc),
+            task_id=task_id,
+        )
+        add_task_event(
+            connection,
+            task_id,
+            "category_taxonomy_failed",
+            "Post-ingest category taxonomy failed.",
+            {"error": str(exc)},
+        )
+        return True
+
+    add_task_event(
+        connection,
+        task_id,
+        "category_taxonomy_completed",
+        "Post-ingest category taxonomy completed.",
+        {
+            "category_run_id": result.category_run_id,
+            "scanned_documents": result.scanned_documents,
+            "confident_count": result.confident_count,
+            "suggestion_count": result.suggestion_count,
+            "abstained_count": result.abstained_count,
+            "preserved_count": result.preserved_count,
+            "error_count": result.error_count,
+            "status": result.status,
+        },
+    )
+    return result.error_count > 0 or result.status != "succeeded"
+
+
+def _run_post_ingest_tag_governance(
+    connection: sqlite3.Connection,
+    vault_path: Path | str,
+    task_id: str,
+) -> bool:
+    """Run v0.3.2 tag governance when enabled. Returns True if visible issues occurred."""
+    paths = vault_paths(vault_path)
+    if not paths.config_path.is_file():
+        return False
+    try:
+        config = load_config(paths.config_path)
+    except Exception:
+        return False
+    if not config.features.tag_governance or not config.features.post_ingest_tagging:
+        return False
+
+    from indbase_core.tag_tagger import run_deterministic_tagger
+
+    try:
+        result = run_deterministic_tagger(connection, trigger="post_ingest")
+    except Exception as exc:
+        record_error(
+            connection,
+            component="tag_governance",
+            error_type="tag_governance_failed",
+            message=str(exc),
+            task_id=task_id,
+        )
+        add_task_event(
+            connection,
+            task_id,
+            "tag_governance_failed",
+            "Post-ingest tag governance failed.",
+            {"error": str(exc)},
+        )
+        return True
+
+    add_task_event(
+        connection,
+        task_id,
+        "tag_governance_completed",
+        "Post-ingest tag governance completed.",
+        {
+            "tagger_run_id": result.tagger_run_id,
+            "scanned_documents": result.scanned_documents,
+            "auto_attached_count": result.auto_attached_count,
+            "candidate_count": result.candidate_count,
+            "new_tag_proposal_count": result.new_tag_proposal_count,
+            "blocked_candidate_count": result.blocked_candidate_count,
+            "error_count": result.error_count,
+            "status": result.status,
+        },
+    )
+    return result.error_count > 0 or result.status == "failed"

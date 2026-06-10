@@ -54,7 +54,7 @@ def main() -> None:
     run(0, "doc", "open", doc["doc_id"], "--vault", str(vault), "--original", "--print-path")
     run(0, "doc", "set-category", doc["doc_id"], str(category_id), "--vault", str(vault))
     run(0, "tag", "list", "--vault", str(vault))
-    run(0, "tag", "add", "acceptance-tag", "--vault", str(vault))
+    run(0, "tag", "add", "acceptance-tag", "--type", "topic", "--vault", str(vault))
     tag_id = _scalar(vault, "SELECT tag_id FROM tags WHERE name = 'acceptance-tag'")
     run(0, "tag", "update", str(tag_id), "--description", "acceptance gate", "--vault", str(vault))
     run(0, "doc", "add-tag", doc["doc_id"], "acceptance-tag", "--vault", str(vault))

@@ -16,6 +16,14 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         "0005_candidate_cards",
         "0006_swallow_ingest_integration",
         "0007_transition_output_integration",
+        "0008_taxonomy_foundation",
+        "0008_v031_taxonomy_category_foundation",
+        "0009_retrieval_intelligence",
+        "0010_retrieval_evaluation",
+        "0011_v032_tag_governance_foundation",
+        "0012_provider_evidence",
+        "0013_provider_failure_class",
+        "0014_source_fts_lineage",
     ]
 
     connection = connect(db_path)
@@ -40,6 +48,9 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
         assert "translations" in tables
         assert "candidate_cards" in tables
         assert "candidate_card_sources" in tables
+        assert "provider_runs" in tables
+        assert "index_builds" in tables
+        assert "index_build_entries" in tables
         versions = [row["version"] for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")]
         assert versions == [
             "0001_initial",
@@ -49,13 +60,24 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "0005_candidate_cards",
             "0006_swallow_ingest_integration",
             "0007_transition_output_integration",
+            "0008_taxonomy_foundation",
+            "0008_v031_taxonomy_category_foundation",
+            "0009_retrieval_intelligence",
+            "0010_retrieval_evaluation",
+            "0011_v032_tag_governance_foundation",
+            "0012_provider_evidence",
+            "0013_provider_failure_class",
+            "0014_source_fts_lineage",
         ]
+        assert "category_profiles" in tables
+        assert "category_classification_runs" in tables
         review_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(review_items)")
         }
         assert "resolution_note" in review_columns
         assert "resolved_by" in review_columns
+        assert {"ingest_run_id", "provider_run_id"} <= review_columns
         ocr_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(ocr_pages)")
@@ -95,7 +117,45 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             "artifact_manifest_json",
             "promotion_status",
             "promotion_reason",
+            "adopted_provider_run_id",
         } <= converter_columns
+        provider_run_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(provider_runs)")
+        }
+        assert {
+            "provider_run_id",
+            "operation_id",
+            "action_id",
+            "provider_id",
+            "provider_version",
+            "capability_id",
+            "transport_profile",
+            "provider_status",
+            "evidence_status",
+            "failure_class",
+            "evidence_root",
+        } <= provider_run_columns
+        ingest_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(ingest_runs)")
+        }
+        assert "adopted_provider_run_id" in ingest_columns
+        output_run_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(output_runs)")
+        }
+        assert "adopted_provider_run_id" in output_run_columns
+        output_artifact_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(output_artifacts)")
+        }
+        assert {"artifact_role", "trust_level"} <= output_artifact_columns
+        error_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(errors)")
+        }
+        assert "provider_run_id" in error_columns
         chunk_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(chunks)")
@@ -106,6 +166,16 @@ def test_initialize_database_applies_initial_schema(tmp_path: Path) -> None:
             for row in connection.execute("PRAGMA table_info(documents)")
         }
         assert {"access_context", "privacy_flags_json", "source_snapshot_path"} <= document_columns
+        index_build_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(index_builds)")
+        }
+        assert {"index_build_id", "index_kind", "scope", "trigger", "status"} <= index_build_columns
+        index_entry_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(index_build_entries)")
+        }
+        assert {"index_build_id", "doc_id", "revision_id", "chunk_id", "status"} <= index_entry_columns
     finally:
         connection.close()
 

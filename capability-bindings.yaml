@@ -1,0 +1,48 @@
+version: 1
+
+providers:
+  swallow:
+    package: swallow
+    version: "^0.2"
+    default_profile: local_core
+    allowed_profiles:
+      - local_core
+      - cli
+      - queue
+    forbidden_by_default:
+      - http
+      - mcp
+
+  transition:
+    package: transition
+    version: "^0.1"
+    default_profile: node_bridge
+    allowed_profiles:
+      - node_bridge
+      - cli
+      - http
+    forbidden_by_default:
+      - queue
+      - mcp
+
+bindings:
+  indbase.ingest.file:
+    provider: swallow
+    provider_capability: swallow.ingest.file
+    profile: local_core
+
+  indbase.ingest.url:
+    provider: swallow
+    provider_capability: swallow.ingest.url
+    profile: cli_or_queue
+    feature_flag: swallow_url_ingest
+
+  indbase.output.normalize:
+    provider: transition
+    provider_capability: transition.markdown.normalize
+    profile: node_bridge
+
+  indbase.output.export:
+    provider: transition
+    provider_capability: transition.markdown.export
+    profile: node_bridge
